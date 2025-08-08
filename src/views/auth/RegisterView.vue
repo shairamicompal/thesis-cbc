@@ -27,13 +27,23 @@ function onClick() {
         <v-container>
           <v-row>
             <v-col cols="12" md="6" class="mx-auto">
-              <v-card class="mx-auto" prepend-icon="mdi-account" subtitle="Log in to your account" elevation="24">
+              <v-card class="mx-auto" prepend-icon="mdi-account-plus" subtitle="Register your account" elevation="24">
                 <template v-slot:title>
                   <span class="font-weight-black">Hematuklas</span>
                 </template>
 
                 <v-card-text class="bg-surface-light pt-4">
                   <v-form fast-fail @submit.prevent>
+                    <v-text-field
+                      label="Firstname"
+                      variant="outlined"
+                    ></v-text-field>
+
+                    <v-text-field
+                      label="Lastname"
+                      variant="outlined"
+                    ></v-text-field>
+
                     <v-text-field
                       label="Email"
                       variant="outlined"
@@ -45,12 +55,18 @@ function onClick() {
                       type="password"
                     ></v-text-field>
 
-                    <v-btn type="submit" block prepend-icon="mdi-login">LOGIN</v-btn>
+                    <v-text-field
+                      label="Password Confirmation"
+                      variant="outlined"
+                      type="password"
+                    ></v-text-field>
+
+                    <v-btn type="submit" block prepend-icon="mdi-account-plus">REGISTER</v-btn>
                   </v-form>
 
                   <v-divider class="my-4"></v-divider>
 
-                  <h5 class="text-center">Don't have an account? <RouterLink to="/register" class="text-primary">Click here to Register</RouterLink></h5>
+                  <h5 class="text-center">Already have an account? <RouterLink to="/" class="text-primary">Click here to Login</RouterLink></h5>
                 </v-card-text>
               </v-card>
             </v-col>
@@ -58,7 +74,7 @@ function onClick() {
         </v-container>
       </v-main>
 
-      <v-footer color="red-darken-3" border app >2024 - Hematuklas</v-footer>
+      <v-footer color="red-darken-3" border app class="text-center">2024 - Hematuklas</v-footer>
     </v-app>
   </v-responsive>
 </template>
