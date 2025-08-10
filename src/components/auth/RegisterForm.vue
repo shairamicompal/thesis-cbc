@@ -1,17 +1,57 @@
+<script setup>
+import { ref } from 'vue'
+
+const isPasswordVisible = ref(false)
+const isPasswordConfirmationVisible = ref(false)
+</script>
+
 <template>
   <v-form fast-fail @submit.prevent>
-    <v-text-field label="Firstname" variant="outlined"></v-text-field>
+    <v-row>
+      <v-col cols="12" md="6">
+        <v-text-field 
+        prepend-inner-icon="mdi-account"
+        label="Firstname" 
+        ></v-text-field>
+      </v-col>
 
-    <v-text-field label="Lastname" variant="outlined"></v-text-field>
+      <v-col cols="12" md="6">
+        <v-text-field 
+        prepend-inner-icon="mdi-account"
+        label="Lastname" 
+        ></v-text-field>
+      </v-col>
 
-    <v-text-field label="Email" variant="outlined"></v-text-field>
+      <v-col cols="12">
+        <v-text-field 
+        prepend-inner-icon="mdi-email"
+        label="Email"
+        ></v-text-field>
+      </v-col>
 
-    <v-text-field label="Password" variant="outlined" type="password"></v-text-field>
+      <v-col cols="12">
+        <v-text-field
+          prepend-inner-icon="mdi-lock"
+          label="Password"
+          :type="isPasswordVisible ? 'text' : 'password'"
+          :append-inner-icon="isPasswordVisible ? 'mdi-eye' : 'mdi-eye-off'"
+          @click:append-inner="isPasswordVisible = !isPasswordVisible"
+        ></v-text-field>
+      </v-col>
 
-    <v-text-field label="Password Confirmation" variant="outlined" type="password"></v-text-field>
+      <v-col cols="12">
+        <v-text-field
+          prepend-inner-icon="mdi-lock"
+          label="Confirm Password"
+          :type="isPasswordConfirmationVisible ? 'text' : 'password'"
+          :append-inner-icon="isPasswordConfirmationVisible ? 'mdi-eye' : 'mdi-eye-off'"
+          @click:append-inner="isPasswordConfirmationVisible = !isPasswordConfirmationVisible"
+        ></v-text-field>
+      </v-col>
+    </v-row>
 
-    <v-btn class="bg-light-blue-darken-4" type="submit" block prepend-icon="mdi-account-plus"
-      >REGISTER</v-btn
-    >
+    <v-btn class="bg-light-blue-darken-4 mt-2" type="submit" block prepend-icon="mdi-account-plus"
+      >REGISTER
+    </v-btn>
   </v-form>
 </template>

@@ -1,45 +1,59 @@
 <script setup>
 import AppLayout from '@/components/layout/AppLayout.vue'
-import RegisterForm from '@/components/auth/RegisterForm.vue'
-
+import RegisterForm from '@/components/auth/RegisterForm.vue';
 import { useDisplay } from 'vuetify'
 
-const { mobile} = useDisplay()
-
+const { mobile } = useDisplay()
 </script>
 
 <template>
-  <AppLayout>
+  <AppLayout :is-with-app-bar-nav-icon="false">
     <template #content>
-      <v-row>
-        <v-col cols="12" md="6" class="mx-auto">
-          <v-card class="mx-auto" elevation="24">
-            <v-card-title>
-              <v-img
-                src="/images/logo-favicon.png"
-               :width="mobile ? '50%' : '25%'"
-                class="mx-auto"
-              ></v-img>
-              <h3 class="font-weight-black text-center">HemaTuklas</h3>
-              <!-- <h4 class="text-center">login</h4> -->
+      <v-container fluid>
+        <v-row>
+          <!-- Left Column for Desktop (hidden on mobile) -->
+          <v-col cols="12" lg="8" class="bg-surface-light h-screen" v-if="!mobile">
+            <!-- <v-img
+              src="/images/banner-pt.png"
+              class="fill-height"
+              alt="Background Image"
+              cover
+            ></v-img> -->
+          </v-col>
 
-              <v-divider class="my-4"></v-divider>
-            </v-card-title>
+          <!-- Right Column for Login Form -->
+          <v-col cols="12" lg="4" :class="mobile ? '' : 'pt-16'">
+            <v-card class="mx-auto" elevation="0" max-width="600">
+              <!-- Card Title with Logo -->
+              <v-card-title class="text-center">
+                <v-img
+                  class="mx-auto mb-10"
+                  src="/images/logo-favicon.png"
+                  :width="mobile ? '75%' : '35%'"
+                ></v-img>
+                <p>Registration</p>
+              </v-card-title>
 
-            <v-card-text class="bg-surface-light pt-4">
-              
+              <v-card-text>
+
+                <v-divider class="my-3"></v-divider>
+
                 <RegisterForm></RegisterForm>
 
-              <v-divider class="my-4"></v-divider>
+                <v-divider class="my-3"></v-divider>
 
-              <h5 class="text-center">
-                Already have an account?
-                <RouterLink to="/" class="text-red-lighten-1">Click here to Login</RouterLink>
-              </h5>
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
+                <!-- Register Link -->
+                <h4 class="text-center">
+                  Already have account?
+                  <router-link class="text-red-darken-3 font-weight-black" to="/">
+                    Click here to Login
+                  </router-link>
+                </h4>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-container>
     </template>
   </AppLayout>
 </template>
