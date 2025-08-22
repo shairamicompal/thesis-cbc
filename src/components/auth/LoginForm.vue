@@ -5,10 +5,13 @@ const isPasswordVisible = ref(false)
 </script>
 
 <template>
-  <v-form fast-fail @submit.prevent>
-    <v-row>
+  <v-form class="mt-5" fast-fail @submit.prevent>
+    <v-row ense class="text-blue-darken-1">
       <v-col cols="12">
-        <v-text-field label="Email" prepend-inner-icon="mdi-email"></v-text-field>
+        <v-text-field 
+        label="Email" 
+        prepend-inner-icon="mdi-email"
+        ></v-text-field>
       </v-col>
 
       <v-col cols="12">
