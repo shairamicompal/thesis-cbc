@@ -7,11 +7,14 @@ import {
 } from '@/utils/validators'
 import { ref } from 'vue'
 import { supabase, formActionDefault } from '@/utils/supabase.js'
+import DashboardView from '@/views/system/DashboardView.vue'
 import AlertNotification from '@/components/common/AlertNotification.vue'
+import { useRouter } from 'vue-router';
 
 const isPasswordVisible = ref(false)
 const isPasswordConfirmationVisible = ref(false)
 const refVForm = ref()
+const router = useRouter()   
 
 const formDataDefault = {
   firstname: '',
@@ -40,6 +43,7 @@ const onSubmit = async () => {
       data: {
         firstname: formData.value.firstname,
         lastname: formData.value.lastname,
+        is_admin: false
       },
     },
   })
@@ -51,9 +55,12 @@ const onSubmit = async () => {
   } else if (data) {
     console.log(data)
     formAction.value.formSuccessMessage = 'Registration successful!'
-    // reset form
-    refVForm.value.reset()
+    
+    router.replace('/dashboard');
   }
+
+  // reset form
+    refVForm.value.reset()
 
   formAction.value.formProcess = false
 }
