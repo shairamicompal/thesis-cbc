@@ -53,10 +53,10 @@ const onLogout = async () => {
         <v-avatar
           v-if="userData && userData.image_url"
           :image="userData.image_url"
-          color="orange-lighten-3"
+          color="red-darken-1"
           size="large"
         />
-        <v-avatar v-else color="orange-lighten-3" size="large">
+        <v-avatar v-else color="red-darken-1" size="large">
           <span class="text-h5">
             {{ getAvatarText(userData ? userData.firstname + ' ' + userData.lastname : '') }}
           </span>
@@ -75,10 +75,10 @@ const onLogout = async () => {
               <v-avatar
                 v-if="userData && userData.image_url"
                 :image="userData.image_url"
-                color="orange-lighten-3"
+                color="blue-darken-1"
                 size="large"
               />
-              <v-avatar v-else color="orange-lighten-3" size="large">
+              <v-avatar v-else color="red-darken-1" size="large">
                 <span class="text-h5">
                   {{ getAvatarText(userData ? userData.firstname + ' ' + userData.lastname : '') }}
                 </span>
