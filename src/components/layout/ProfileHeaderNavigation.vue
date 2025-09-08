@@ -1,37 +1,27 @@
 <script setup>
 import { supabase, formActionDefault } from '@/utils/supabase'
 import { getAvatarText } from '@/utils/helpers'
-import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ref } from 'vue'
+import { useAuthUserStore } from '@/stores/authUser'
 
-// Router
+// Utilize pre-defined vue functions
 const router = useRouter()
+
+// Use Pinia Store
+const authStore = useAuthUserStore()
 
 // Load Variables
 const formAction = ref({
   ...formActionDefault
 })
 
-// User data
-const userData = ref(null)
-
-// Get current user on mount
-onMounted(async () => {
-  const { data, error } = await supabase.auth.getUser()
-  if (!error && data?.user) {
-    userData.value = {
-      email: data.user.email,
-      firstname: data.user.user_metadata?.firstname || '',
-      lastname: data.user.user_metadata?.lastname || '',
-      image_url: data.user.user_metadata?.avatar_url || null
-    }
-  }
-})
-
 // Logout Functionality
 const onLogout = async () => {
+  /// Reset Form Action utils; Turn on processing at the same time
   formAction.value = { ...formActionDefault, formProcess: true }
 
+  // Get supabase logout functionality
   const { error } = await supabase.auth.signOut()
   if (error) {
     console.error('Error during logout:', error)
@@ -39,26 +29,32 @@ const onLogout = async () => {
   }
 
   formAction.value.formProcess = false
-
+  // Reset State
+  setTimeout(() => {
+    authStore.$reset()
+  }, 2500)
   // Redirect to homepage
   router.replace('/')
 }
+
+
 </script>
 
 <template>
   <v-menu min-width="200px" rounded>
     <template #activator="{ props }">
       <v-btn icon v-bind="props">
-        <!-- Avatar: show uploaded image if available, else initials -->
         <v-avatar
-          v-if="userData && userData.image_url"
-          :image="userData.image_url"
-          color="red-darken-1"
+          v-if="authStore.userData && authStore.userData.image_url"
+          :image="authStore.userData.image_url"
+          color="orange-lighten-3"
           size="large"
-        />
-        <v-avatar v-else color="red-darken-1" size="large">
+        >
+        </v-avatar>
+
+        <v-avatar v-else color="orange-lighten-3" size="large">
           <span class="text-h5">
-            {{ getAvatarText(userData ? userData.firstname + ' ' + userData.lastname : '') }}
+            {{ getAvatarText(authStore.userData ? authStore.userData.firstname + ' ' + authStore.userData.lastname : '') }}
           </span>
         </v-avatar>
       </v-btn>
@@ -68,19 +64,21 @@ const onLogout = async () => {
       <v-card-text>
         <v-list>
           <v-list-item
-            :subtitle="userData ? userData.email : ''"
-            :title="userData ? userData.firstname + ' ' + userData.lastname : ''"
+            :subtitle="authStore.userData ? authStore.userData.email : ''"
+            :title="authStore.userData ? authStore.userData.firstname + ' ' + authStore.userData.lastname : ''"
           >
             <template #prepend>
               <v-avatar
-                v-if="userData && userData.image_url"
-                :image="userData.image_url"
-                color="blue-darken-1"
+                v-if="authStore.userData && authStore.userData.image_url"
+                :image="authStore.userData.image_url"
+                color="orange-lighten-3"
                 size="large"
-              />
-              <v-avatar v-else color="red-darken-1" size="large">
+              >
+              </v-avatar>
+
+              <v-avatar v-else color="orange-lighten-3" size="large">
                 <span class="text-h5">
-                  {{ getAvatarText(userData ? userData.firstname + ' ' + userData.lastname : '') }}
+                  {{ getAvatarText(authStore.userData ? authStore.userData.firstname + ' ' + authStore.userData.lastname : '') }}
                 </span>
               </v-avatar>
             </template>
