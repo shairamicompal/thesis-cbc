@@ -122,3 +122,45 @@ export const alphaDashValidator = (value) => {
     'Your input must be alphanumeric and can only include dashes (-) and underscores (_).'
   )
 }
+
+
+// 👉 Image Validator
+export const imageValidator = (value) => {
+  if (isEmpty(value)) return true
+
+  return !value || !value.length || value[0].size < 2000000 || 'Image size should be less than 2 MB'
+}
+
+// 👉 Description Validator
+export const descriptionValidator = (value) => {
+  if (isEmpty(value)) return true
+
+  // Count the sentences by splitting on periods, exclamation marks, or question marks
+  const sentences = value
+    .trim()
+    .split(/[\.\!\?]+/)
+    .filter(Boolean)
+
+  // Count the words by splitting on spaces
+  const wordCount = value.trim().split(/\s+/).length
+
+  // Validate sentence and word count
+  if (sentences.length < 1 || sentences.length > 3) {
+    return 'The description must contain 1 to 3 sentences.'
+  }
+
+  if (wordCount > 30) {
+    return 'The description must contain no more than 30 words.'
+  }
+
+  return true
+}
+
+// 👉 Contact Number Validator
+export const contactNumberValidator = (value) => {
+  if (isEmpty(value)) return true
+
+  return (
+    /^[0-9]{11}$/.test(String(value)) || 'The Contact Number field must be exactly 11 digits long.'
+  )
+}
