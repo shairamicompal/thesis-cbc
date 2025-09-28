@@ -27,7 +27,7 @@ const isDrawerVisible = ref(true)
               <!-- Brand / title -->
               <div class="text-h5 text-md-h4 font-weight-bold mb-6 text-center">
                 <span class="text-brown-darken-2">Hema</span
-                ><span class="text-red-accent-3">Tuklas</span>
+                ><span class="text-red-accent-3">Sense</span>
               </div>
 
               <!-- Responsive row: stack on mobile, side-by-side on lg -->
@@ -35,7 +35,7 @@ const isDrawerVisible = ref(true)
                 <!-- Welcome message -->
                 <v-col cols="12" lg="6" class="d-flex align-center">
                   <div class="text-body-2 text-medium-emphasis text-center text-lg-start">
-                    “Welcome to HemaTuklas, your AI-powered guide for understanding your CBC
+                    “Welcome to HemaSense, your AI-powered guide for understanding your CBC
                     results. Gain clear insights and helpful explanations that empower you to make
                     informed decisions—because knowing more means living smarter.”
                   </div>
