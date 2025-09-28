@@ -1,123 +1,324 @@
+<!-- src/views/InterpreterView.vue -->
 <script setup>
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
 import { ref, computed, watch } from 'vue'
 import { useDisplay } from 'vuetify'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
 const { mobile } = useDisplay()
 const isDrawerVisible = ref(true)
 
-/* -------------------------------------------
-   PREFLIGHT (Dialog) STATE
--------------------------------------------- */
-const preflightOpen = ref(true) // show dialog on load
-const preStep = ref(1) // 1..4
-const formReady = ref(false) // becomes true after Finish
-const aborted = ref(false) // user opted to leave via Home
+/* ------------ Environment ------------ */
+/* Groq (DeepSeek) */
+const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY ?? ''
+const GROQ_MODEL = import.meta.env.VITE_GROQ_MODEL ?? 'deepseek-r1-distill-llama-70b'
+/* OpenAI (ChatGPT) */
+const OPENAI_KEY = import.meta.env.VITE_OPENAI_API_KEY ?? ''
+const OPENAI_MODEL = import.meta.env.VITE_OPENAI_MODEL ?? 'gpt-4o-mini'
+const OPENAI_BASE_URL = import.meta.env.VITE_OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
 
-// Step 1: Consent
-const consent = ref({
-  acknowledgePurpose: false,
-  agreeProcessing: false,
-  noEmergency: false,
+/* ------------ Form State ------------ */
+const formRef = ref()
+const loading = ref(false)
+const errorMsg = ref('')
+const aiResult = ref('')
+
+const form = ref({
+  age: '',
+  sex: 'F',
+  wbc: '',
+  rbc: '',
+  hb: '',
+  hct: '',
+  mcv: '',
+  mch: '',
+  mchc: '',
+  plt: '',
+  neutrophils: '',
+  lymphocytes: '',
+  monocytes: '',
+  eosinophils: '',
 })
 
-// Step 2: Profile + Context
-const profileCtx = ref({
-  age: null, // user age (no "years" label)
-  sexAtBirth: null, // collected but NOT displayed in review
-  takenDate: null, // ISO date (CBC taken)
-  symptoms: [],
-  symptomsOther: '',
+/* ------------ Validation ------------ */
+const numberRule = (v) =>
+  v === '' || v === null || v === undefined || !isNaN(Number(v)) || 'Numbers only'
+const requiredNumberRule = (v) =>
+  (v !== '' && v !== null && v !== undefined && !isNaN(Number(v))) || 'Required number'
+
+/* ------------ Ranges + helpers ------------ */
+const ranges = {
+  wbc: { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
+  rbcM: { low: 4.5, high: 5.2, unit: '×10¹²/L', label: 'RBC' },
+  rbcF: { low: 3.4, high: 5.6, unit: '×10¹²/L', label: 'RBC' },
+  hbM: { low: 135, high: 175, unit: 'g/L', label: 'Hemoglobin' },
+  hbF: { low: 125, high: 155, unit: 'g/L', label: 'Hemoglobin' },
+  hctM: { low: 0.4, high: 0.52, unit: 'L/L', label: 'Hematocrit' },
+  hctF: { low: 0.36, high: 0.48, unit: 'L/L', label: 'Hematocrit' },
+  mcv: { low: 82, high: 92, unit: 'fL', label: 'MCV' },
+  mch: { low: 27, high: 32, unit: 'pg', label: 'MCH' },
+  mchc: { low: 320, high: 380, unit: 'g/L', label: 'MCHC' },
+  plt: { low: 150, high: 400, unit: '×10⁹/L', label: 'Platelets' },
+  neut: { low: 0.5, high: 0.7, unit: '', label: 'Neutrophils' },
+  lymph: { low: 0.2, high: 0.4, unit: '', label: 'Lymphocytes' },
+  mono: { low: 0.02, high: 0.06, unit: '', label: 'Monocytes' },
+  eos: { low: 0.02, high: 0.05, unit: '', label: 'Eosinophils' },
+}
+
+const sex = computed(() => (form.value.sex === 'M' ? 'M' : 'F'))
+const rbcHint = computed(() =>
+  sex.value === 'M' ? 'Normal: 4.5–5.2 ×10¹²/L' : 'Normal: 3.4–5.6 ×10¹²/L',
+)
+const hbHint = computed(() => (sex.value === 'M' ? 'Normal: 135–175 g/L' : 'Normal: 125–155 g/L'))
+const hctHint = computed(() =>
+  sex.value === 'M' ? 'Normal: 0.40–0.52 L/L' : 'Normal: 0.36–0.48 L/L',
+)
+
+const parse = (v) => (v === '' || v === null || v === undefined ? NaN : Number(v))
+const getStatus = (val, low, high) => {
+  if (!isFinite(val)) return '—'
+  if (val < low) return 'Low'
+  if (val > high) return 'High'
+  return 'Normal'
+}
+
+const summaryItems = computed(() => {
+  const s = sex.value
+  return [
+    {
+      key: 'wbc',
+      ...ranges.wbc,
+      value: parse(form.value.wbc),
+      status: getStatus(parse(form.value.wbc), ranges.wbc.low, ranges.wbc.high),
+    },
+    {
+      key: 'rbc',
+      ...(s === 'M' ? ranges.rbcM : ranges.rbcF),
+      value: parse(form.value.rbc),
+      status: getStatus(
+        parse(form.value.rbc),
+        s === 'M' ? ranges.rbcM.low : ranges.rbcF.low,
+        s === 'M' ? ranges.rbcM.high : ranges.rbcF.high,
+      ),
+    },
+    {
+      key: 'hb',
+      ...(s === 'M' ? ranges.hbM : ranges.hbF),
+      value: parse(form.value.hb),
+      status: getStatus(
+        parse(form.value.hb),
+        s === 'M' ? ranges.hbM.low : ranges.hbF.low,
+        s === 'M' ? ranges.hbM.high : ranges.hbF.high,
+      ),
+    },
+    {
+      key: 'hct',
+      ...(s === 'M' ? ranges.hctM : ranges.hctF),
+      value: parse(form.value.hct),
+      status: getStatus(
+        parse(form.value.hct),
+        s === 'M' ? ranges.hctM.low : ranges.hctF.low,
+        s === 'M' ? ranges.hctM.high : ranges.hctF.high,
+      ),
+    },
+    {
+      key: 'mcv',
+      ...ranges.mcv,
+      value: parse(form.value.mcv),
+      status: getStatus(parse(form.value.mcv), ranges.mcv.low, ranges.mcv.high),
+    },
+    {
+      key: 'mch',
+      ...ranges.mch,
+      value: parse(form.value.mch),
+      status: getStatus(parse(form.value.mch), ranges.mch.low, ranges.mch.high),
+    },
+    {
+      key: 'mchc',
+      ...ranges.mchc,
+      value: parse(form.value.mchc),
+      status: getStatus(parse(form.value.mchc), ranges.mchc.low, ranges.mchc.high),
+    },
+    {
+      key: 'plt',
+      ...ranges.plt,
+      value: parse(form.value.plt),
+      status: getStatus(parse(form.value.plt), ranges.plt.low, ranges.plt.high),
+    },
+    {
+      key: 'neut',
+      ...ranges.neut,
+      value: parse(form.value.neutrophils),
+      status: getStatus(parse(form.value.neutrophils), ranges.neut.low, ranges.neut.high),
+    },
+    {
+      key: 'lymph',
+      ...ranges.lymph,
+      value: parse(form.value.lymphocytes),
+      status: getStatus(parse(form.value.lymphocytes), ranges.lymph.low, ranges.lymph.high),
+    },
+    {
+      key: 'mono',
+      ...ranges.mono,
+      value: parse(form.value.monocytes),
+      status: getStatus(parse(form.value.monocytes), ranges.mono.low, ranges.mono.high),
+    },
+    {
+      key: 'eos',
+      ...ranges.eos,
+      value: parse(form.value.eosinophils),
+      status: getStatus(parse(form.value.eosinophils), ranges.eos.low, ranges.eos.high),
+    },
+  ]
 })
 
-// Step 3: Reference Model (locked to Pentra)
-const referenceModel = ref({
-  usePentraButuan: true,
-  useGeneralRanges: false,
-  units: 'SI',
-  machineName: 'Pentra (Butuan)',
-})
+const chipColor = (status) =>
+  status === 'Low'
+    ? 'error'
+    : status === 'High'
+      ? 'warning'
+      : status === 'Normal'
+        ? 'success'
+        : undefined
 
-const SYMPTOMS = [
-  'Anemia',
-  'Leukocytosis',
-  'Leukopenia',
-  'Neutrophilia',
-  'Neutropenia',
-  'Lymphocytosis',
-  'Lymphopenia',
-  'Thrombocytosis',
-  'Thrombocytopenia',
-  'Infection (suspected/ongoing)',
-  'Inflammation',
-  'Bleeding tendency',
-  'Allergic reaction',
-  'Other (specify)',
+/* ------------ Provider selector ------------ */
+const provider = ref(localStorage.getItem('cbc_ai_provider') || 'groq') // 'groq' | 'openai'
+const providerItems = [
+  { title: 'DeepSeek (Groq)', value: 'groq' },
+  { title: 'ChatGPT (OpenAI)', value: 'openai' },
 ]
+watch(provider, (v) => localStorage.setItem('cbc_ai_provider', v))
 
-// Validation per step
-const stepValid = computed(() => {
-  switch (preStep.value) {
-    case 1:
-      return (
-        consent.value.acknowledgePurpose &&
-        consent.value.agreeProcessing &&
-        consent.value.noEmergency
-      )
-    case 2:
-      return (
-        Number.isFinite(profileCtx.value.age) &&
-        profileCtx.value.age >= 0 &&
-        !!profileCtx.value.sexAtBirth &&
-        !!profileCtx.value.takenDate
-      )
-    case 3:
-      return referenceModel.value.usePentraButuan || referenceModel.value.useGeneralRanges
-    case 4:
-      return true
-    default:
-      return false
+/* ------------ DeepSeek <think> stripper ------------ */
+function stripThink(text = '') {
+  if (!text) return ''
+  // If a closing tag exists, keep only what comes AFTER it
+  if (text.includes('</think>')) {
+    text = text.split('</think>').pop()
   }
-})
-
-function nextStep() {
-  if (!stepValid.value) return
-  if (preStep.value < 4) preStep.value += 1
-  else finishPreflight()
-}
-function prevStep() {
-  if (preStep.value > 1) preStep.value -= 1
+  // Remove any remaining <think>...</think> blocks (defensive)
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '')
+  // Optionally remove "Reasoning:" headers some models add
+  text = text.replace(/^\s*(?:reasoning|thoughts?)\s*:\s*.*?\n{2,}/i, '')
+  return text.trim()
 }
 
-function finishPreflight() {
-  preflightOpen.value = false
-  formReady.value = true
-}
-
-function goHome() {
-  aborted.value = true
-  preflightOpen.value = false
-  router.push('/') // adjust if your home route differs
-}
-
-// Reset dialog if user reopens (optional)
-watch(preflightOpen, (open) => {
-  if (open === true && formReady.value === false) {
-    preStep.value = 1
+/* ------------ AI callers ------------ */
+async function callGroq(prompt) {
+  if (!GROQ_KEY) throw new Error('Missing VITE_GROQ_API_KEY in .env')
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${GROQ_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      temperature: 0.4,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Be precise and concise. Use only provided reference ranges. Avoid diagnosis. ' +
+            'Do NOT include <think> or internal reasoning; output only the final answer sections.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  })
+  if (!res.ok) {
+    const txt = await res.text()
+    let msg = txt
+    try { msg = JSON.parse(txt)?.error?.message || msg } catch {}
+    throw new Error(`Groq request failed (${res.status}): ${msg}`)
   }
-})
+  const data = await res.json()
+  const raw = data?.choices?.[0]?.message?.content || '(No content returned)'
+  return stripThink(raw)
+}
 
-/* CBC parameters (internal; not shown here) */
-const CBC_RBC_PARAMS = ['RBC', 'HGB', 'HCT', 'MCV', 'MCH', 'MCHC']
-const CBC_WBC_PARAMS = ['WBC']
-const CBC_DIFF_PARAMS = ['NEUT', 'LYMPH', 'MONO', 'EO', 'BASO']
-const CBC_PLT_PARAMS = ['PLT']
-const CBC_PANEL_DEF = {
-  type: 'cbc_diff',
-  params: [...CBC_RBC_PARAMS, ...CBC_WBC_PARAMS, ...CBC_DIFF_PARAMS, ...CBC_PLT_PARAMS],
+async function callOpenAI(prompt) {
+  if (!OPENAI_KEY) throw new Error('Missing VITE_OPENAI_API_KEY in .env')
+  const url = `${OPENAI_BASE_URL.replace(/\/$/, '')}/chat/completions`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      temperature: 0.4,
+      messages: [
+        {
+          role: 'system',
+          content: 'Be precise and concise. Use only provided reference ranges. Avoid diagnosis.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  })
+  if (!res.ok) {
+    const txt = await res.text()
+    let msg = txt
+    try { msg = JSON.parse(txt)?.error?.message || msg } catch {}
+    throw new Error(`OpenAI request failed (${res.status}): ${msg}`)
+  }
+  const data = await res.json()
+  return data?.choices?.[0]?.message?.content || '(No content returned)'
+}
+
+/* ------------ Submit ------------ */
+async function onSubmit() {
+  errorMsg.value = ''
+  aiResult.value = ''
+
+  const result = await formRef.value?.validate()
+  if (result && result.valid === false) return
+
+  const sexStr = sex.value
+  const prompt = `
+You are a hematology assistant. Use ONLY these reference ranges:
+WBC 5.0–10.0 ×10^9/L; RBC ${sexStr === 'M' ? '4.5–5.2' : '3.4–5.6'} ×10^12/L; Hb ${sexStr === 'M' ? '135–175' : '125–155'} g/L;
+Hct ${sexStr === 'M' ? '0.40–0.52' : '0.36–0.48'} L/L; MCV 82–92 fL; MCH 27–32 pg; MCHC 320–380 g/L; Platelets 150–400 ×10^9/L;
+Neutrophils 0.50–0.70; Lymphocytes 0.20–0.40; Monocytes 0.02–0.06; Eosinophils 0.02–0.05.
+
+Patient
+- Age: ${form.value.age || 'N/A'} years
+- Sex: ${sexStr === 'M' ? 'Male' : 'Female'}
+
+CBC Results (value • unit • reference)
+- WBC: ${form.value.wbc || 'N/A'} ×10^9/L
+- RBC: ${form.value.rbc || 'N/A'} ×10^12/L
+- Hemoglobin: ${form.value.hb || 'N/A'} g/L
+- Hematocrit: ${form.value.hct || 'N/A'} L/L
+- MCV: ${form.value.mcv || 'N/A'} fL
+- MCH: ${form.value.mch || 'N/A'} pg
+- MCHC: ${form.value.mchc || 'N/A'} g/L
+- Platelets: ${form.value.plt || 'N/A'} ×10^9/L
+- Neutrophils: ${form.value.neutrophils || 'N/A'}
+- Lymphocytes: ${form.value.lymphocytes || 'N/A'}
+- Monocytes: ${form.value.monocytes || 'N/A'}
+- Eosinophils: ${form.value.eosinophils || 'N/A'}
+
+OUTPUT FORMAT:
+1) Detailed Interpretation Breakdown
+   - Each parameter: Result vs Ref, one short note.
+2) Summary of Findings
+   - 2–4 bullets max.
+3) Next Steps (Clinical Correlation Needed)
+   - 3–5 bullets, end with disclaimer.
+`
+
+  loading.value = true
+  try {
+    aiResult.value =
+      provider.value === 'openai' ? await callOpenAI(prompt) : await callGroq(prompt)
+  } catch (e) {
+    errorMsg.value = e.message || 'Something went wrong while contacting the AI service.'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -131,202 +332,284 @@ const CBC_PANEL_DEF = {
     </template>
 
     <template #content>
-      <!-- ===== Pre-Intake Dialog (fullscreen on mobile) ===== -->
-      <v-dialog v-model="preflightOpen" :fullscreen="mobile" :persistent="false" :max-width="720">
-        <v-card>
-          <v-toolbar density="comfortable" color="primary" dark>
-            <!-- Home icon (leave) -->
-            <v-btn icon variant="text" @click="goHome" :aria-label="'Home'">
-              <v-icon>mdi-home</v-icon>
-            </v-btn>
-            <v-toolbar-title>
-              {{ preStep <= 3 ? 'Before You Input Your CBC' : 'Review & Confirm' }}
-            </v-toolbar-title>
-            <v-spacer />
-            <div class="text-caption">Step {{ preStep }} / 4</div>
-          </v-toolbar>
+      <v-container class="py-6" style="max-width: 1000px">
+        <v-card rounded="xl">
+          <v-card-item class="pb-0">
+            <v-card-title :class="mobile ? 'text-subtitle-1' : 'text-h6'">CBC Interpreter</v-card-title>
 
-          <v-card-text class="pa-4">
-            <!-- STEP 1: Consent -->
-            <div v-if="preStep === 1" class="d-flex flex-column ga-4">
-              <div class="text-h6">Safety, Privacy, and Scope</div>
-              <div class="text-body-2">
-                This tool helps you <strong>understand</strong> your CBC. It does not provide a
-                medical diagnosis.
-              </div>
-              <v-checkbox
-                v-model="consent.acknowledgePurpose"
-                label="I understand this is an educational guide and not a medical diagnosis."
-              />
-              <v-checkbox
-                v-model="consent.agreeProcessing"
-                label="I agree to data processing per the Data Privacy Act of 2012."
-              />
-              <v-checkbox
-                v-model="consent.noEmergency"
-                label="I am not using this for an emergency."
-              />
-            </div>
+            <v-card-subtitle class="text-body-2" :class="{ 'text-center': mobile }">
+              Enter your CBC values below — review the status overview, then analyze with AI.
+            </v-card-subtitle>
+          </v-card-item>
 
-            <!-- STEP 2: Profile + Context -->
-            <div v-else-if="preStep === 2" class="d-flex flex-column ga-4">
-              <div class="text-h6">Profile & Context</div>
-
-              <!-- Age (no 'years' in label) -->
-              <v-text-field
-                v-model.number="profileCtx.age"
-                label="Age"
-                type="number"
-                min="0"
-                :rules="[(v) => (v !== null && v !== '' && v >= 0) || 'Enter a valid age']"
-                hint="Enter your current age"
-                persistent-hint
-              />
-
-              <!-- Changed label -->
-              <v-radio-group v-model="profileCtx.sexAtBirth" label="Sex">
-                <v-radio label="Female" value="female" />
-                <v-radio label="Male" value="male" />
-              </v-radio-group>
-
-              <v-text-field
-                v-model="profileCtx.takenDate"
-                type="date"
-                label="Date the CBC was taken"
-              />
-
-              <v-select
-                v-model="profileCtx.symptoms"
-                :items="SYMPTOMS"
-                label="Doctor-confirmed findings you remember"
-                hint="Select only what your doctor told you"
-                chips
-                multiple
-                clearable
-                persistent-hint
-              />
-
-              <v-text-field
-                v-if="profileCtx.symptoms?.includes('Other (specify)')"
-                v-model="profileCtx.symptomsOther"
-                label="Other (please specify)"
-                placeholder="(optional) Type what the doctor said"
-                clearable
-              />
-            </div>
-
-            <!-- STEP 3: Reference Model (locked Pentra) -->
-            <div v-else-if="preStep === 3" class="d-flex flex-column ga-4">
-              <div class="text-h6">Reference Model</div>
-              <v-alert type="info" variant="tonal">
-                We adhere to the <strong>{{ referenceModel.machineName }}</strong> used here in
-                Butuan. Units: <strong>{{ referenceModel.units }}</strong
-                >.
+          <v-card-text>
+            <v-form ref="formRef">
+              <v-alert
+                v-if="errorMsg"
+                type="error"
+                class="mb-4"
+                variant="tonal"
+                density="comfortable"
+              >
+                {{ errorMsg }}
               </v-alert>
-              <v-switch
-                v-model="referenceModel.usePentraButuan"
-                :readonly="true"
+
+              <!-- Patient -->
+              <div class="mb-2 text-subtitle-2">Patient</div>
+              <v-row>
+                <v-col :cols="mobile ? 12 : 4">
+                  <v-text-field
+                    label="Age"
+                    v-model="form.age"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="numeric"
+                    suffix="years"
+                    variant="outlined"
+                    density="comfortable"
+                    rounded
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 8" class="d-flex align-center">
+                  <v-radio-group v-model="form.sex" inline class="mt-0">
+                    <v-label class="mr-3">Sex</v-label>
+                    <v-radio label="Female" value="F" />
+                    <v-radio label="Male" value="M" />
+                  </v-radio-group>
+                </v-col>
+              </v-row>
+
+              <!-- CBC Core -->
+              <div class="mt-4 mb-2 text-subtitle-2">CBC Core</div>
+              <v-row>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="WBC"
+                    v-model="form.wbc"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="×10⁹/L"
+                    hint="Normal: 5.0–10.0"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="RBC"
+                    v-model="form.rbc"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="×10¹²/L"
+                    :hint="rbcHint"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="Hemoglobin"
+                    v-model="form.hb"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="g/L"
+                    :hint="hbHint"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="Hematocrit"
+                    v-model="form.hct"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="L/L"
+                    :hint="hctHint"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="Platelets"
+                    v-model="form.plt"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="×10⁹/L"
+                    hint="Normal: 150–400"
+                    persistent-hint
+                  />
+                </v-col>
+              </v-row>
+
+              <!-- Red Cell Indices -->
+              <div class="mt-4 mb-2 text-subtitle-2">Red Cell Indices</div>
+              <v-row>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="MCV"
+                    v-model="form.mcv"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="fL"
+                    hint="Normal: 82–92"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="MCH"
+                    v-model="form.mch"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="pg"
+                    hint="Normal: 27–32"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="MCHC"
+                    v-model="form.mchc"
+                    :rules="[requiredNumberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    suffix="g/L"
+                    hint="Normal: 320–380"
+                    persistent-hint
+                  />
+                </v-col>
+              </v-row>
+
+              <!-- Differential -->
+              <div class="mt-4 mb-2 text-subtitle-2">Differential (Ratios 0–1)</div>
+              <v-row>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="Neutrophils"
+                    v-model="form.neutrophils"
+                    :rules="[numberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    placeholder="e.g., 0.62"
+                    hint="Normal: 0.50–0.70"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="Lymphocytes"
+                    v-model="form.lymphocytes"
+                    :rules="[numberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    placeholder="e.g., 0.25"
+                    hint="Normal: 0.20–0.40"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="Monocytes"
+                    v-model="form.monocytes"
+                    :rules="[numberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    placeholder="e.g., 0.04"
+                    hint="Normal: 0.02–0.06"
+                    persistent-hint
+                  />
+                </v-col>
+                <v-col :cols="mobile ? 12 : 3">
+                  <v-text-field
+                    label="Eosinophils"
+                    v-model="form.eosinophils"
+                    :rules="[numberRule]"
+                    type="number"
+                    inputmode="decimal"
+                    placeholder="e.g., 0.02"
+                    hint="Normal: 0.02–0.05"
+                    persistent-hint
+                  />
+                </v-col>
+              </v-row>
+
+              <!-- Status Overview -->
+              <v-divider class="my-4" />
+              <v-alert type="info" variant="tonal" rounded="lg" class="mb-4">
+                <div class="mb-2 text-subtitle-2">Status Overview</div>
+                <div class="d-flex flex-wrap ga-2">
+                  <v-chip
+                    v-for="item in summaryItems"
+                    :key="item.key"
+                    :color="chipColor(item.status)"
+                    :variant="item.status === '—' ? 'outlined' : 'flat'"
+                    density="comfortable"
+                    class="mb-1"
+                  >
+                    {{ item.label }}:
+                    <strong class="ml-1">{{ isFinite(item.value) ? item.value : '—' }}</strong>
+                    <span class="ml-1">{{ item.unit }}</span>
+                    <span class="ml-2">• {{ item.status }}</span>
+                  </v-chip>
+                </div>
+              </v-alert>
+
+              <!-- Provider + Analyze -->
+              <v-row class="mb-2" align="center" no-gutters>
+                <v-col :cols="mobile ? 12 : 6">
+                  <v-select
+                    v-model="provider"
+                    :items="providerItems"
+                    label="AI Provider"
+                    variant="outlined"
+                    density="comfortable"
+                    rounded
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+
+              <v-btn
                 color="primary"
-                label="Pentra (Butuan) reference (locked)"
-                inset
-              />
-              <v-switch
-                v-model="referenceModel.useGeneralRanges"
-                color="secondary"
-                inset
-                label="(Optional) Allow general reference ranges"
-                hint="Keep off to strictly follow the Pentra machine."
-                persistent-hint
-              />
-            </div>
+                size="large"
+                :loading="loading"
+                :disabled="loading"
+                @click="onSubmit"
+                class="mb-2"
+              >
+                Get Interpretation (AI)
+              </v-btn>
+              <v-progress-linear v-if="loading" indeterminate class="mb-2" />
+            </v-form>
 
-            <!-- STEP 4: Review -->
-            <div v-else class="d-flex flex-column ga-4">
-              <div class="text-h6">Review</div>
-              <v-list density="compact" lines="one">
-                <v-list-subheader>Consent</v-list-subheader>
-                <v-list-item
-                  title="Educational use acknowledged"
-                  :subtitle="consent.acknowledgePurpose ? 'Yes' : 'No'"
-                />
-                <v-list-item
-                  title="Data-use agreement"
-                  :subtitle="consent.agreeProcessing ? 'Accepted' : 'Not accepted'"
-                />
-                <v-list-item
-                  title="Not for emergencies"
-                  :subtitle="consent.noEmergency ? 'Yes' : 'No'"
-                />
+            <v-divider />
 
-                <v-divider class="my-2" />
-
-                <v-list-subheader>Profile & Context</v-list-subheader>
-                <v-list-item title="Age" :subtitle="String(profileCtx.age ?? '—')" />
-                <!-- Sex at birth intentionally NOT shown in results per request -->
-                <v-list-item title="CBC date" :subtitle="profileCtx.takenDate || '—'" />
-                <v-list-item
-                  title="Doctor-confirmed findings"
-                  :subtitle="
-                    profileCtx.symptoms?.filter((s) => s !== 'Other (specify)').join(', ') || 'None'
-                  "
-                />
-                <v-list-item
-                  title="Others"
-                  :subtitle="
-                    profileCtx.symptoms?.includes('Other (specify)')
-                      ? profileCtx.symptomsOther || ''
-                      : ''
-                  "
-                />
-                <v-divider class="my-2" />
-
-                <v-list-subheader>Reference Model</v-list-subheader>
-                <v-list-item title="Machine" :subtitle="referenceModel.machineName" />
-                <v-list-item title="Units" :subtitle="referenceModel.units" />
-                <v-list-item
-                  title="General ranges allowed"
-                  :subtitle="referenceModel.useGeneralRanges ? 'Yes' : 'No (strict Pentra)'"
-                />
-              </v-list>
-            </div>
+            <!-- AI Result -->
+            <v-card v-if="aiResult" class="mt-4" rounded="xl">
+              <v-card-title>AI Interpretation</v-card-title>
+              <v-card-text style="max-height: 420px; overflow: auto">
+                <pre style="white-space: pre-wrap; font-family: inherit; line-height: 1.55">
+{{ aiResult }}
+                </pre>
+              </v-card-text>
+            </v-card>
           </v-card-text>
-
-          <v-divider />
-
-          <v-card-actions class="pa-3">
-            <!-- Cancel removed; keep Home icon above -->
-            <v-spacer />
-            <v-btn variant="text" @click="prevStep" :disabled="preStep === 1">Back</v-btn>
-            <v-btn color="primary" :disabled="!stepValid" @click="nextStep">
-              {{ preStep < 4 ? 'Continue' : 'Finish & Start Input' }}
-            </v-btn>
-          </v-card-actions>
         </v-card>
-      </v-dialog>
-
-      <!-- ===== Page content below ===== -->
-      <div class="pa-4">
-        <v-alert
-          v-if="!formReady && !aborted"
-          type="warning"
-          variant="tonal"
-          title="Complete pre-intake"
-          text="Please complete the short pre-intake to start entering CBC values."
-        />
-        <v-alert
-          v-else-if="aborted && !formReady"
-          type="info"
-          variant="tonal"
-          title="You left the intake"
-          text="You can start again anytime."
-        />
-        <div v-else class="d-flex flex-column ga-4">
-          <div class="text-h6">CBC Manual Input (Pentra-aligned)</div>
-          <v-alert type="success" variant="tonal">
-            Pre-intake complete. Render your CBC input fields here.
-          </v-alert>
-        </div>
-      </div>
+      </v-container>
     </template>
   </AppLayout>
 </template>
+
+<style scoped>
+/* let subtitles wrap instead of being forced to a single line */
+:deep(.v-card-subtitle) {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}
+</style>

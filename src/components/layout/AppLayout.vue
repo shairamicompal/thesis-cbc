@@ -141,7 +141,7 @@ onMounted(() => {
           Copyright © 2025 -
           <span class="ml-1">
             <v-icon class="mr-1">mdi-bottle-tonic-plus</v-icon>
-            HemaTuklas 
+            HemaSense
           </span>
            | All Rights Reserved
         </div>
