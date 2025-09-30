@@ -78,12 +78,12 @@ const onFormSubmit = () => {
   ></AlertNotification>
 
   <v-form ref="refVForm" @submit.prevent="onFormSubmit">
-    <v-row  class="text-amber-darken-4 mt-2">
+    <v-row  class="text-blue-darken-3 mt-2">
       <v-col cols="12" md="5">
         <v-img
           width="55%"
           class="mx-auto rounded-circle"
-          color="brown-lighten-1"
+          color="blue-lighten-1"
           aspect-ratio="1"
           :src="imgPreview"
           alt="Profile Picture Preview"
@@ -109,7 +109,7 @@ const onFormSubmit = () => {
         <v-btn
           class="mt-2"
           type="submit"
-          color="brown-lighten-1"
+          color="red-darken-3"
           prepend-icon="mdi-image-edit"
           :disabled="formAction.formProcess"
           :loading="formAction.formProcess"
