@@ -59,7 +59,7 @@ const onFormSubmit = () => {
   ></AlertNotification>
 
   <v-form ref="refVForm" @submit.prevent="onFormSubmit">
-    <v-row dense  class="text-amber-darken-4">
+    <v-row dense  class="text-blue-darken-3">
       <v-col cols="12" md="4">
         <v-text-field
           v-model="formData.firstname"
@@ -104,7 +104,7 @@ const onFormSubmit = () => {
     <v-btn
       class="mt-2"
       type="submit"
-      color="brown-lighten-1"
+      color="red-darken-3"
       prepend-icon="mdi-account-box-edit-outline"
       :disabled="formAction.formProcess"
       :loading="formAction.formProcess"
