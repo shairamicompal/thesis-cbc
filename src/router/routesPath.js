@@ -5,6 +5,8 @@ import ForbiddenView from '@/views/errors/ForbiddenView.vue'
 import NotFoundView from '@/views/errors/NotFoundView.vue'
 import AccountSettingsView from '@/views/system/AccountSettingsView.vue'
 import InterpreterView from '@/views/system/InterpreterView.vue'
+import HistoryView from '@/views/system/HistoryView.vue'
+import AnalysisView from '@/views/system/AnalysisView.vue'
 // 👉 Routes
 export const routesPath = [
     // Auth Pages
@@ -37,6 +39,18 @@ export const routesPath = [
         path: '/interpreter',
         name: 'interpreter',
         component: InterpreterView,
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/history',
+        name: 'history',
+        component: HistoryView,
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/analysis',
+        name: 'analysis',
+        component: AnalysisView,
         meta: { requiresAuth: true }
     },
     {

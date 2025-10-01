@@ -1,28 +1,34 @@
+<!-- src/views/AccountSettingsView.vue -->
 <script setup>
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
+import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
+
 import PasswordForm from '@/components/system/account-settings/PasswordForm.vue'
 import PictureForm from '@/components/system/account-settings/PictureForm.vue'
 import ProfileForm from '@/components/system/account-settings/ProfileForm.vue'
+
 import { useAuthUserStore } from '@/stores/authUser'
 import { ref } from 'vue'
+import { useDisplay } from 'vuetify'
 
-// Use Pinia Store
 const authStore = useAuthUserStore()
+const { mobile } = useDisplay()
 
-// Load Variables
 const isDrawerVisible = ref(true)
 </script>
 
 <template>
   <AppLayout
-    :is-with-app-bar-nav-icon="true"
+    :is-with-app-bar-nav-icon="!mobile"        
     @is-drawer-visible="isDrawerVisible = !isDrawerVisible"
   >
+    <!-- Left drawer for desktop/tablet -->
     <template #navigation>
-      <SideNavi :is-drawer-visible="isDrawerVisible"></SideNavi>
+      <SideNavi v-if="!mobile" :is-drawer-visible="isDrawerVisible" />
     </template>
 
+    <!-- Page content -->
     <template #content>
       <v-container>
         <v-card class="mb-5">
@@ -30,7 +36,7 @@ const isDrawerVisible = ref(true)
             <span class="text-h6 font-weight-bold">
               <v-breadcrumbs :items="['Account', 'Settings']">
                 <template #prepend>
-                  <v-icon icon="mdi-wrench" size="small" class="me-1"></v-icon>
+                  <v-icon icon="mdi-wrench" size="small" class="me-1" />
                 </template>
               </v-breadcrumbs>
             </span>
@@ -50,21 +56,17 @@ const isDrawerVisible = ref(true)
                 <v-img
                   width="50%"
                   class="mx-auto rounded-circle"
-                  color="brown-lighten-1"
+                  color="blue-lighten-1"
                   aspect-ratio="1"
                   :src="authStore.userData.image_url || '/images/img-profile.png'"
                   alt="Profile Picture"
                   cover
-                >
-                </v-img>
-
+                />
                 <h3 class="d-flex align-center justify-center mt-5">
-                  <v-icon class="me-2" icon="mdi-account-badge"> </v-icon>
+                  <v-icon class="me-2" icon="mdi-account-badge" />
                   {{ authStore.userRole }}
                 </h3>
-
-                <v-divider class="my-5"></v-divider>
-
+                <v-divider class="my-5" />
                 <div class="text-center">
                   <h4 class="my-2">
                     <b>Fullname:</b>
@@ -79,25 +81,24 @@ const isDrawerVisible = ref(true)
 
           <v-col cols="12" lg="8">
             <v-card class="mb-5" title="Profile Picture">
-              <v-card-text>
-                <PictureForm></PictureForm>
-              </v-card-text>
+              <v-card-text><PictureForm /></v-card-text>
             </v-card>
 
             <v-card class="mb-5" title="Profile Information">
-              <v-card-text>
-                <ProfileForm></ProfileForm>
-              </v-card-text>
+              <v-card-text><ProfileForm /></v-card-text>
             </v-card>
 
             <v-card class="mb-5" title="Change Password">
-              <v-card-text>
-                <PasswordForm></PasswordForm>
-              </v-card-text>
+              <v-card-text><PasswordForm /></v-card-text>
             </v-card>
           </v-col>
         </v-row>
       </v-container>
+    </template>
+
+    <!-- Bottom tabs for mobile -->
+    <template #bottom>
+      <BottomNavi v-if="mobile" />
     </template>
   </AppLayout>
 </template>

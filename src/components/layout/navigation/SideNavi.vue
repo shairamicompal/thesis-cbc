@@ -44,7 +44,7 @@ function generateRoute(title) {
       <v-divider />
 
       <v-list-item
-        prepend-icon="mdi-wrench"
+        prepend-icon="mdi-account"
         title="Account Settings"
         to="/account/settings"
       />
