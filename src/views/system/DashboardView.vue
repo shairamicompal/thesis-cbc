@@ -1,6 +1,7 @@
 <script setup>
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
+import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
 import { ref } from 'vue'
 import { useDisplay } from 'vuetify'
 
@@ -10,12 +11,12 @@ const isDrawerVisible = ref(true)
 
 <template>
   <AppLayout
-    :is-with-app-bar-nav-icon="true"
+    :is-with-app-bar-nav-icon="!mobile"             
     @is-drawer-visible="isDrawerVisible = !isDrawerVisible"
   >
     <!-- navigation slot -->
     <template #navigation>
-      <SideNavi :is-drawer-visible="isDrawerVisible" />
+      <SideNavi v-if="!mobile" :is-drawer-visible="isDrawerVisible" />
     </template>
 
     <!-- content slot -->
@@ -26,13 +27,11 @@ const isDrawerVisible = ref(true)
             <v-card class="pa-5 pa-md-6 rounded-xl" elevation="4">
               <!-- Brand / title -->
               <div class="text-h5 text-md-h4 font-weight-bold mb-6 text-center">
-                <span class="text-brown-darken-2">Hema</span
-                ><span class="text-red-accent-3">Sense</span>
+                <span class="text-brown-darken-2">Hema</span><span class="text-red-accent-3">Sense</span>
               </div>
 
-              <!-- Responsive row: stack on mobile, side-by-side on lg -->
+              <!-- Responsive row -->
               <v-row align="center" justify="center" class="mb-6">
-                <!-- Welcome message -->
                 <v-col cols="12" lg="6" class="d-flex align-center">
                   <div class="text-body-2 text-medium-emphasis text-center text-lg-start">
                     “Welcome to HemaSense, your AI-powered guide for understanding your CBC
@@ -41,7 +40,6 @@ const isDrawerVisible = ref(true)
                   </div>
                 </v-col>
 
-                <!-- Image -->
                 <v-col cols="12" lg="6">
                   <v-img
                     src="/images/illustration/ill1.png"
@@ -52,7 +50,6 @@ const isDrawerVisible = ref(true)
                 </v-col>
               </v-row>
 
-              <!-- Continue button -->
               <v-btn
                 color="red-accent-3"
                 class="text-none rounded-lg"
@@ -67,6 +64,11 @@ const isDrawerVisible = ref(true)
           </v-col>
         </v-row>
       </v-container>
+    </template>
+
+    <!-- 👇 bottom slot (mobile only) -->
+    <template #bottom>
+      <BottomNavi v-if="mobile" />
     </template>
   </AppLayout>
 </template>
