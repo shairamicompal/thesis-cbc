@@ -20,7 +20,6 @@ const isDrawerVisible = ref(true)
     </template>
 
     <!-- content slot -->
-    <!-- content slot -->
     <template #content>
       <v-container class="py-6">
         <!-- Page Title -->
@@ -32,19 +31,6 @@ const isDrawerVisible = ref(true)
           records once available.
         </p>
 
-        <!-- Placeholder Cards -->
-        <v-row dense>
-          <v-col cols="12" md="6" lg="4" v-for="n in 3" :key="n">
-            <v-card elevation="2" class="pa-4">
-              <h3 class="text-subtitle-1 font-weight-medium">CBC Record #{{ n }}</h3>
-              <p class="text-body-2 text-grey-darken-1">
-                Date: 2025-09-1{{ n }}
-                <br />
-                Status: Placeholder record for testing UI layout.
-              </p>
-            </v-card>
-          </v-col>
-        </v-row>
       </v-container>
     </template>
 

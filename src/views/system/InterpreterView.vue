@@ -2,20 +2,20 @@
 <script setup>
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
-import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'  // 👈 add this
+import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
 import { ref, computed, watch } from 'vue'
 import { useDisplay } from 'vuetify'
+import { getCBCInterpretation as getAI } from '@/utils/API'        // ⬅️ updated import
+import { renderMarkdownSafe } from '@/utils/markdown'   // Markdown -> HTML
 
 const { mobile } = useDisplay()
 const isDrawerVisible = ref(true)
 
 /* ------------ Environment ------------ */
-/* Groq (DeepSeek) */
 const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY ?? ''
-const GROQ_MODEL = import.meta.env.VITE_GROQ_MODEL ?? 'deepseek-r1-distill-llama-70b'
-/* OpenAI (ChatGPT) */
+const GROQ_MODEL = import.meta.env.VITE_GROQ_MODEL ?? 'qwen/qwen3-32b'   // ⬅️ Qwen3-32B
 const OPENAI_KEY = import.meta.env.VITE_OPENAI_API_KEY ?? ''
-const OPENAI_MODEL = import.meta.env.VITE_OPENAI_MODEL ?? 'gpt-4o-mini'
+const OPENAI_MODEL = import.meta.env.VITE_OPENAI_MODEL ?? 'gpt-4o'        // ⬅️ ChatGPT 4o
 const OPENAI_BASE_URL = import.meta.env.VITE_OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
 
 /* ------------ Form State ------------ */
@@ -23,6 +23,7 @@ const formRef = ref()
 const loading = ref(false)
 const errorMsg = ref('')
 const aiResult = ref('')
+const htmlResult = computed(() => renderMarkdownSafe(aiResult.value))
 
 const form = ref({
   age: '',
@@ -110,12 +111,12 @@ const chipColor = (status) =>
 /* ------------ Provider selector ------------ */
 const provider = ref(localStorage.getItem('cbc_ai_provider') || 'groq')
 const providerItems = [
-  { title: 'DeepSeek (Groq)', value: 'groq' },
-  { title: 'ChatGPT (OpenAI)', value: 'openai' },
+  { title: 'Qwen3-32B (Groq)', value: 'groq' },
+  { title: 'ChatGPT 4o (OpenAI)', value: 'openai' },
 ]
 watch(provider, (v) => localStorage.setItem('cbc_ai_provider', v))
 
-/* ------------ DeepSeek <think> stripper ------------ */
+/* ------------ <think> stripper (safe no-op for models that don't emit it) ------------ */
 function stripThink(text = '') {
   if (!text) return ''
   if (text.includes('</think>')) text = text.split('</think>').pop()
@@ -124,17 +125,107 @@ function stripThink(text = '') {
   return text.trim()
 }
 
+/* ------------ Prompt builder ------------ */
+function buildPrompt() {
+  const s = sex.value
+  const core = [
+    `Age: ${form.value.age}`,
+    `Sex: ${s}`,
+    `WBC: ${form.value.wbc} ×10⁹/L (ref ${ranges.wbc.low}–${ranges.wbc.high})`,
+    `RBC: ${form.value.rbc} ×10¹²/L (ref ${s === 'M' ? ranges.rbcM.low : ranges.rbcF.low}–${s === 'M' ? ranges.rbcM.high : ranges.rbcF.high})`,
+    `Hemoglobin: ${form.value.hb} g/L (ref ${s === 'M' ? ranges.hbM.low : ranges.hbF.low}–${s === 'M' ? ranges.hbM.high : ranges.hbF.high})`,
+    `Hematocrit: ${form.value.hct} L/L (ref ${s === 'M' ? ranges.hctM.low : ranges.hctF.low}–${s === 'M' ? ranges.hctM.high : ranges.hctF.high})`,
+    `Platelets: ${form.value.plt} ×10⁹/L (ref ${ranges.plt.low}–${ranges.plt.high})`,
+    `MCV: ${form.value.mcv} fL (ref ${ranges.mcv.low}–${ranges.mcv.high})`,
+    `MCH: ${form.value.mch} pg (ref ${ranges.mch.low}–${ranges.mch.high})`,
+    `MCHC: ${form.value.mchc} g/L (ref ${ranges.mchc.low}–${ranges.mchc.high})`,
+    `Neutrophils: ${form.value.neutrophils} (ref ${ranges.neut.low}–${ranges.neut.high})`,
+    `Lymphocytes: ${form.value.lymphocytes} (ref ${ranges.lymph.low}–${ranges.lymph.high})`,
+    `Monocytes: ${form.value.monocytes} (ref ${ranges.mono.low}–${ranges.mono.high})`,
+    `Eosinophils: ${form.value.eosinophils} (ref ${ranges.eos.low}–${ranges.eos.high})`,
+  ].join('\n')
+
+  return `
+You are a hematology explainer. Use ONLY the reference ranges supplied in the prompt. Avoid diagnosis.
+Return Markdown with EXACTLY these sections and headings (in this order), using short bullet points:
+
+## 1) 🔎 Detailed Interpretation Breakdown
+- For each parameter that is Out-of-Range, list "**Name**: value — **Low/High** (Ref: min–max)" and 1 short reason.
+- If a parameter is Normal but contextually relevant, you may include it briefly.
+
+## 2) ✅ Summarized Final Interpretation
+- 2–4 bullet points, plain language, the overall picture.
+
+## 3) 📌 Suggested Next Steps
+- 2–4 practical bullets (general guidance only, no diagnosis). Include a brief safety note about symptoms and consulting a clinician.
+
+CBC (use these ranges only):
+${core}
+`.trim()
+}
+
 /* ------------ AI callers ------------ */
-async function callGroq(prompt) { /* ...unchanged... */ }
-async function callOpenAI(prompt) { /* ...unchanged... */ }
+async function callGroq(prompt) {
+  const text = await getAI({
+    provider: 'groq',
+    prompt,
+    configs: { groqKey: GROQ_KEY, groqModel: GROQ_MODEL },
+  })
+  return stripThink(text)
+}
+
+async function callOpenAI(prompt) {
+  const text = await getAI({
+    provider: 'openai',
+    prompt,
+    configs: {
+      openaiKey: OPENAI_KEY,
+      openaiModel: OPENAI_MODEL,
+      openaiBaseUrl: OPENAI_BASE_URL,
+    },
+  })
+  return text
+}
 
 /* ------------ Submit ------------ */
-async function onSubmit() { /* ...unchanged... */ }
+async function onSubmit() {
+  errorMsg.value = ''
+  aiResult.value = ''
+
+  if (formRef.value?.validate) {
+    const { valid } = await formRef.value.validate()
+    if (!valid) {
+      errorMsg.value = 'Please fix the highlighted fields.'
+      return
+    }
+  }
+
+  const required = ['age', 'wbc', 'rbc', 'hb', 'hct', 'mcv', 'mch', 'mchc', 'plt']
+  const missing = required.filter(
+    (k) => form.value[k] === '' || form.value[k] === null || form.value[k] === undefined,
+  )
+  if (missing.length) {
+    errorMsg.value = `Missing required fields: ${missing.join(', ')}`
+    return
+  }
+
+  loading.value = true
+  try {
+    const prompt = buildPrompt()
+    const raw = provider.value === 'openai' ? await callOpenAI(prompt) : await callGroq(prompt)
+    aiResult.value = stripThink(raw)
+  } catch (e) {
+    console.error(e)
+    errorMsg.value = String(e?.message || e || 'Something went wrong while calling AI.')
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
   <AppLayout
-    :is-with-app-bar-nav-icon="!mobile"             
+    :is-with-app-bar-nav-icon="!mobile"
     @is-drawer-visible="isDrawerVisible = !isDrawerVisible"
   >
     <!-- Left drawer (desktop/tablet only) -->
@@ -144,12 +235,12 @@ async function onSubmit() { /* ...unchanged... */ }
 
     <!-- Main content -->
     <template #content>
-   
       <v-container class="py-6" style="max-width: 1000px">
         <v-card rounded="xl">
           <v-card-item class="pb-0">
-            <v-card-title :class="mobile ? 'text-subtitle-1' : 'text-h6'">CBC Interpreter</v-card-title>
-
+            <v-card-title :class="mobile ? 'text-subtitle-1' : 'text-h6'">
+              CBC Interpreter
+            </v-card-title>
             <v-card-subtitle class="text-body-2" :class="{ 'text-center': mobile }">
               Enter your CBC values below — review the status overview, then analyze with AI.
             </v-card-subtitle>
@@ -402,13 +493,11 @@ async function onSubmit() { /* ...unchanged... */ }
 
             <v-divider />
 
-            <!-- AI Result -->
+            <!-- AI Result (Markdown-rendered with 3 headline sections) -->
             <v-card v-if="aiResult" class="mt-4" rounded="xl">
               <v-card-title>AI Interpretation</v-card-title>
               <v-card-text style="max-height: 420px; overflow: auto">
-                <pre style="white-space: pre-wrap; font-family: inherit; line-height: 1.55">
-{{ aiResult }}
-                </pre>
+                <div v-html="htmlResult" class="ai-markdown"></div>
               </v-card-text>
             </v-card>
           </v-card-text>
@@ -424,9 +513,27 @@ async function onSubmit() { /* ...unchanged... */ }
 </template>
 
 <style scoped>
-:deep(.v-card-subtitle){
+:deep(.v-card-subtitle) {
   white-space: normal !important;
   overflow: visible !important;
   text-overflow: unset !important;
 }
+
+/* Markdown display styling */
+.ai-markdown {
+  font-family: 'Poppins', sans-serif;
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+.ai-markdown h2 {
+  margin: 0.35rem 0 0.45rem;
+  font-weight: 700;
+  font-size: 1.02rem;
+}
+.ai-markdown ul, .ai-markdown ol {
+  margin: 0.25rem 0 0.55rem;
+  padding-left: 1.25rem;
+}
+.ai-markdown li { margin: 0.18rem 0; }
+.ai-markdown strong { font-weight: 600; }
 </style>

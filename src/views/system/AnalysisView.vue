@@ -31,26 +31,6 @@ const isDrawerVisible = ref(true)
           analytics and charts once implemented.
         </p>
 
-        <!-- Placeholder Sections -->
-        <v-row dense>
-          <v-col cols="12">
-            <v-card elevation="2" class="pa-4 mb-4">
-              <h3 class="text-subtitle-1 font-weight-medium">Trend Analysis</h3>
-              <p class="text-body-2 text-grey-darken-1">
-                Placeholder for charts and graphs that will visualize CBC trends.
-              </p>
-            </v-card>
-          </v-col>
-
-          <v-col cols="12">
-            <v-card elevation="2" class="pa-4 mb-4">
-              <h3 class="text-subtitle-1 font-weight-medium">AI Insights</h3>
-              <p class="text-body-2 text-grey-darken-1">
-                Placeholder for AI-powered interpretations and recommendations.
-              </p>
-            </v-card>
-          </v-col>
-        </v-row>
       </v-container>
     </template>
 
