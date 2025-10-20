@@ -19,12 +19,16 @@ const items = computed(() => {
   return [HOME, ...filtered, ACCOUNT]
 })
 
+/* 🔹 Is the current route the Interpreter page (or a child route)? */
+const isFabActive = computed(() => route.path.startsWith(FAB.path))
+
+/* 🔹 When on Interpreter, don't select any bottom-nav item */
 const activeIndex = computed(() => {
-  const idx = items.value.findIndex(i => i.path === route.path)
+  if (isFabActive.value) return null
+  const idx = items.value.findIndex(i => route.path.startsWith(i.path))
   return idx === -1 ? 0 : idx
 })
 
-/* 👉 find the two items that flank the center so we can give them extra spacing */
 const leftFlankIndex  = computed(() => Math.ceil(items.value.length / 2) - 1)
 const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
 </script>
@@ -37,8 +41,8 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
     bg-color="white"
     border="top"
     class="bn"
-    :model-value="activeIndex"
-    style="--fab-gap: 25px;" 
+    :model-value="activeIndex ?? undefined"
+    style="--fab-gap: 25px;"
   >
     <v-btn
       v-for="(item, i) in items"
@@ -52,9 +56,8 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
         'flank-left':  i === leftFlankIndex,
         'flank-right': i === rightFlankIndex
       }"
-      exact
-      :selected-class="null"
       :ripple="false"
+      :selected-class="null"
     >
       <span class="active-pill" aria-hidden="true"></span>
       <v-icon :icon="item.icon" />
@@ -64,9 +67,17 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
 
   <!-- Floating Interpreter FAB (teleported, never clipped) -->
   <teleport to="body">
-    <div class="fab-fixed">
+    <div class="fab-fixed" :class="{ 'fab-active': isFabActive }">
       <div class="fab-ring" aria-hidden="true"></div>
-      <v-btn class="fab-btn" :to="FAB.path" icon elevation="16" :ripple="false">
+      <v-btn
+        class="fab-btn"
+        :class="{ active: isFabActive }"
+        :to="FAB.path"
+        icon
+        elevation="16"
+        :ripple="false"
+        :aria-current="isFabActive ? 'page' : undefined"
+      >
         <v-icon :icon="FAB.icon" size="28" />
       </v-btn>
     </div>
@@ -74,20 +85,15 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
 </template>
 
 <style scoped>
-/* Clean nav */
 :deep(.bn .v-btn--active){ background: transparent !important; }
 .bn { position: relative; border-radius: 0; }
 
-/* Equal-ish spacing + touch area */
 .v-bottom-navigation { padding: 0 8px; }
 .nav-btn { min-width: 70px; margin: 0 7px; position: relative; color:#6b7280; }
 
-/* 👉 Extra breathing room beside the FAB */
 .nav-btn.flank-left  { margin-right:  var(--fab-gap, 44px); }
 .nav-btn.flank-right { margin-left:   var(--fab-gap, 44px); }
-/* If you want even more space on tiny screens, bump --fab-gap with a media query */
 
-/* Active halo */
 .active-pill{
   position: absolute; inset: 5px auto auto 50%; transform: translateX(-50%);
   width: 36px; height: 36px; border-radius: 999px;
@@ -115,13 +121,11 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
 }
 .fab-btn:hover{ transform: translateY(-2px); background:#3d91e4; box-shadow:0 22px 34px rgba(61, 111, 228, 0.4);}
 
-.v-bottom-navigation {
-  padding: 0 8px;          /* spacing on the sides */
-}
+/* 🔹 Visual "active" state for the FAB when on /interpreter */
+.fab-fixed.fab-active .fab-ring{ box-shadow: 0 14px 28px rgba(61,111,228,.35); }
+.fab-btn.active{ background:#2f7ad4; box-shadow:0 22px 34px rgba(61,111,228,.45); transform: translateY(-1px); }
 
-.nav-btn {
-  margin: 0 -3px;           /* spacing between icons */
-  min-width: 70px;         /* wider click/touch area */
-}
-
+/* spacing tweaks you already had */
+.v-bottom-navigation { padding: 0 8px; }
+.nav-btn { margin: 0 -3px; min-width: 70px; }
 </style>
