@@ -1,22 +1,20 @@
 <!-- src/views/InterpreterView.vue -->
+<!-- src/views/InterpreterView.vue -->
 <script setup>
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
 import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
 import { ref, computed, watch } from 'vue'
 import { useDisplay } from 'vuetify'
-import { getCBCInterpretation as getAI } from '@/utils/API'        // ⬅️ updated import
-import { renderMarkdownSafe } from '@/utils/markdown'   // Markdown -> HTML
+import { getCBCInterpretation as getAI } from '@/utils/API' // central API
+import { renderMarkdownSafe } from '@/utils/markdown' // Markdown -> HTML
 
 const { mobile } = useDisplay()
 const isDrawerVisible = ref(true)
 
-/* ------------ Environment ------------ */
-const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY ?? ''
-const GROQ_MODEL = import.meta.env.VITE_GROQ_MODEL ?? 'qwen/qwen3-32b'   // ⬅️ Qwen3-32B
-const OPENAI_KEY = import.meta.env.VITE_OPENAI_API_KEY ?? ''
-const OPENAI_MODEL = import.meta.env.VITE_OPENAI_MODEL ?? 'gpt-4o'        // ⬅️ ChatGPT 4o
-const OPENAI_BASE_URL = import.meta.env.VITE_OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
+/* ------------ AI Models (server handles API keys) ------------ */
+const GROQ_MODEL = 'qwen/qwen3-32b' // Groq (Qwen 32B)
+const OPENAI_MODEL = 'gpt-4o' // ChatGPT 4o
 
 /* ------------ Form State ------------ */
 const formRef = ref()
@@ -48,7 +46,7 @@ const numberRule = (v) =>
 const requiredNumberRule = (v) =>
   (v !== '' && v !== null && v !== undefined && !isNaN(Number(v))) || 'Required number'
 
-/* ------------ Ranges + helpers ------------ */
+/* ------------ Reference Ranges ------------ */
 const ranges = {
   wbc: { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
   rbcM: { low: 4.5, high: 5.2, unit: '×10¹²/L', label: 'RBC' },
@@ -76,6 +74,7 @@ const hctHint = computed(() =>
   sex.value === 'M' ? 'Normal: 0.40–0.52 L/L' : 'Normal: 0.36–0.48 L/L',
 )
 
+/* ------------ Helpers ------------ */
 const parse = (v) => (v === '' || v === null || v === undefined ? NaN : Number(v))
 const getStatus = (val, low, high) => {
   if (!isFinite(val)) return '—'
@@ -87,26 +86,101 @@ const getStatus = (val, low, high) => {
 const summaryItems = computed(() => {
   const s = sex.value
   return [
-    { key: 'wbc', ...ranges.wbc, value: parse(form.value.wbc), status: getStatus(parse(form.value.wbc), ranges.wbc.low, ranges.wbc.high) },
-    { key: 'rbc', ...(s === 'M' ? ranges.rbcM : ranges.rbcF), value: parse(form.value.rbc),
-      status: getStatus(parse(form.value.rbc), s === 'M' ? ranges.rbcM.low : ranges.rbcF.low, s === 'M' ? ranges.rbcM.high : ranges.rbcF.high) },
-    { key: 'hb', ...(s === 'M' ? ranges.hbM : ranges.hbF), value: parse(form.value.hb),
-      status: getStatus(parse(form.value.hb), s === 'M' ? ranges.hbM.low : ranges.hbF.low, s === 'M' ? ranges.hbM.high : ranges.hbF.high) },
-    { key: 'hct', ...(s === 'M' ? ranges.hctM : ranges.hctF), value: parse(form.value.hct),
-      status: getStatus(parse(form.value.hct), s === 'M' ? ranges.hctM.low : ranges.hctF.low, s === 'M' ? ranges.hctM.high : ranges.hctF.high) },
-    { key: 'mcv', ...ranges.mcv, value: parse(form.value.mcv), status: getStatus(parse(form.value.mcv), ranges.mcv.low, ranges.mcv.high) },
-    { key: 'mch', ...ranges.mch, value: parse(form.value.mch), status: getStatus(parse(form.value.mch), ranges.mch.low, ranges.mch.high) },
-    { key: 'mchc', ...ranges.mchc, value: parse(form.value.mchc), status: getStatus(parse(form.value.mchc), ranges.mchc.low, ranges.mchc.high) },
-    { key: 'plt', ...ranges.plt, value: parse(form.value.plt), status: getStatus(parse(form.value.plt), ranges.plt.low, ranges.plt.high) },
-    { key: 'neut', ...ranges.neut, value: parse(form.value.neutrophils), status: getStatus(parse(form.value.neutrophils), ranges.neut.low, ranges.neut.high) },
-    { key: 'lymph', ...ranges.lymph, value: parse(form.value.lymphocytes), status: getStatus(parse(form.value.lymphocytes), ranges.lymph.low, ranges.lymph.high) },
-    { key: 'mono', ...ranges.mono, value: parse(form.value.monocytes), status: getStatus(parse(form.value.monocytes), ranges.mono.low, ranges.mono.high) },
-    { key: 'eos', ...ranges.eos, value: parse(form.value.eosinophils), status: getStatus(parse(form.value.eosinophils), ranges.eos.low, ranges.eos.high) },
+    {
+      key: 'wbc',
+      ...ranges.wbc,
+      value: parse(form.value.wbc),
+      status: getStatus(parse(form.value.wbc), ranges.wbc.low, ranges.wbc.high),
+    },
+    {
+      key: 'rbc',
+      ...(s === 'M' ? ranges.rbcM : ranges.rbcF),
+      value: parse(form.value.rbc),
+      status: getStatus(
+        parse(form.value.rbc),
+        s === 'M' ? ranges.rbcM.low : ranges.rbcF.low,
+        s === 'M' ? ranges.rbcM.high : ranges.rbcF.high,
+      ),
+    },
+    {
+      key: 'hb',
+      ...(s === 'M' ? ranges.hbM : ranges.hbF),
+      value: parse(form.value.hb),
+      status: getStatus(
+        parse(form.value.hb),
+        s === 'M' ? ranges.hbM.low : ranges.hbF.low,
+        s === 'M' ? ranges.hbM.high : ranges.hbF.high,
+      ),
+    },
+    {
+      key: 'hct',
+      ...(s === 'M' ? ranges.hctM : ranges.hctF),
+      value: parse(form.value.hct),
+      status: getStatus(
+        parse(form.value.hct),
+        s === 'M' ? ranges.hctM.low : ranges.hctF.low,
+        s === 'M' ? ranges.hctM.high : ranges.hctF.high,
+      ),
+    },
+    {
+      key: 'mcv',
+      ...ranges.mcv,
+      value: parse(form.value.mcv),
+      status: getStatus(parse(form.value.mcv), ranges.mcv.low, ranges.mcv.high),
+    },
+    {
+      key: 'mch',
+      ...ranges.mch,
+      value: parse(form.value.mch),
+      status: getStatus(parse(form.value.mch), ranges.mch.low, ranges.mch.high),
+    },
+    {
+      key: 'mchc',
+      ...ranges.mchc,
+      value: parse(form.value.mchc),
+      status: getStatus(parse(form.value.mchc), ranges.mchc.low, ranges.mchc.high),
+    },
+    {
+      key: 'plt',
+      ...ranges.plt,
+      value: parse(form.value.plt),
+      status: getStatus(parse(form.value.plt), ranges.plt.low, ranges.plt.high),
+    },
+    {
+      key: 'neut',
+      ...ranges.neut,
+      value: parse(form.value.neutrophils),
+      status: getStatus(parse(form.value.neutrophils), ranges.neut.low, ranges.neut.high),
+    },
+    {
+      key: 'lymph',
+      ...ranges.lymph,
+      value: parse(form.value.lymphocytes),
+      status: getStatus(parse(form.value.lymphocytes), ranges.lymph.low, ranges.lymph.high),
+    },
+    {
+      key: 'mono',
+      ...ranges.mono,
+      value: parse(form.value.monocytes),
+      status: getStatus(parse(form.value.monocytes), ranges.mono.low, ranges.mono.high),
+    },
+    {
+      key: 'eos',
+      ...ranges.eos,
+      value: parse(form.value.eosinophils),
+      status: getStatus(parse(form.value.eosinophils), ranges.eos.low, ranges.eos.high),
+    },
   ]
 })
 
 const chipColor = (status) =>
-  status === 'Low' ? 'error' : status === 'High' ? 'warning' : status === 'Normal' ? 'success' : undefined
+  status === 'Low'
+    ? 'error'
+    : status === 'High'
+      ? 'warning'
+      : status === 'Normal'
+        ? 'success'
+        : undefined
 
 /* ------------ Provider selector ------------ */
 const provider = ref(localStorage.getItem('cbc_ai_provider') || 'groq')
@@ -116,7 +190,7 @@ const providerItems = [
 ]
 watch(provider, (v) => localStorage.setItem('cbc_ai_provider', v))
 
-/* ------------ <think> stripper (safe no-op for models that don't emit it) ------------ */
+/* ------------ <think> stripper ------------ */
 function stripThink(text = '') {
   if (!text) return ''
   if (text.includes('</think>')) text = text.split('</think>').pop()
@@ -147,29 +221,29 @@ function buildPrompt() {
 
   return `
 You are a hematology explainer. Use ONLY the reference ranges supplied in the prompt. Avoid diagnosis.
-Return Markdown with EXACTLY these sections and headings (in this order), using short bullet points:
+Return Markdown with EXACTLY these sections:
 
 ## 1) 🔎 Detailed Interpretation Breakdown
-- For each parameter that is Out-of-Range, list "**Name**: value — **Low/High** (Ref: min–max)" and 1 short reason.
-- If a parameter is Normal but contextually relevant, you may include it briefly.
+- For each parameter that is Out-of-Range, list "**Name**: value — **Low/High** (Ref: min–max)" and a short reason.
+- If a parameter is Normal but contextually relevant, include briefly.
 
 ## 2) ✅ Summarized Final Interpretation
-- 2–4 bullet points, plain language, the overall picture.
+- 2–4 bullet points summarizing overall results.
 
 ## 3) 📌 Suggested Next Steps
-- 2–4 practical bullets (general guidance only, no diagnosis). Include a brief safety note about symptoms and consulting a clinician.
+- 2–4 general recommendations, reminding the user to consult a clinician.
 
 CBC (use these ranges only):
 ${core}
 `.trim()
 }
 
-/* ------------ AI callers ------------ */
+/* ------------ AI Callers (via backend proxy) ------------ */
 async function callGroq(prompt) {
   const text = await getAI({
     provider: 'groq',
+    model: GROQ_MODEL,
     prompt,
-    configs: { groqKey: GROQ_KEY, groqModel: GROQ_MODEL },
   })
   return stripThink(text)
 }
@@ -177,12 +251,8 @@ async function callGroq(prompt) {
 async function callOpenAI(prompt) {
   const text = await getAI({
     provider: 'openai',
+    model: OPENAI_MODEL,
     prompt,
-    configs: {
-      openaiKey: OPENAI_KEY,
-      openaiModel: OPENAI_MODEL,
-      openaiBaseUrl: OPENAI_BASE_URL,
-    },
   })
   return text
 }
@@ -530,10 +600,15 @@ async function onSubmit() {
   font-weight: 700;
   font-size: 1.02rem;
 }
-.ai-markdown ul, .ai-markdown ol {
+.ai-markdown ul,
+.ai-markdown ol {
   margin: 0.25rem 0 0.55rem;
   padding-left: 1.25rem;
 }
-.ai-markdown li { margin: 0.18rem 0; }
-.ai-markdown strong { font-weight: 600; }
+.ai-markdown li {
+  margin: 0.18rem 0;
+}
+.ai-markdown strong {
+  font-weight: 600;
+}
 </style>
