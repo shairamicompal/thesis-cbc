@@ -1,34 +1,16 @@
 // src/utils/API/openaiClient.js
-export async function callOpenAI({ prompt, model, apiKey, baseUrl }) {
-  const url = (baseUrl || "https://api.openai.com/v1") + "/chat/completions";
-
-  const res = await fetch(url, {
+export async function callOpenAI({ prompt, model, apiBase = "" }) {
+  const res = await fetch(`${apiBase}/api/ask`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,               // e.g., "gpt-4o"
-      temperature: 0.4,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Be precise and concise. Use only provided reference ranges. Avoid diagnosis.",
-        },
-        { role: "user", content: prompt },
-      ],
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider: "openai", model, prompt }),
   });
 
   if (!res.ok) {
-    const txt = await res.text();
-    let msg = txt;
-    try { msg = JSON.parse(txt)?.error?.message || msg; } catch {}
-    throw new Error(`OpenAI request failed (${res.status}): ${msg}`);
+    const txt = await res.text().catch(() => "");
+    throw new Error(txt || `OpenAI proxy failed with ${res.status}`);
   }
-
   const data = await res.json();
-  return data?.choices?.[0]?.message?.content || "(No content returned)";
+  if (data?.error) throw new Error(data.error);
+  return data?.text ?? "(No content returned)";
 }
