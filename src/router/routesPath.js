@@ -7,6 +7,7 @@ import AccountSettingsView from '@/views/system/AccountSettingsView.vue'
 import InterpreterView from '@/views/system/InterpreterView.vue'
 import HistoryView from '@/views/system/HistoryView.vue'
 import AnalysisView from '@/views/system/AnalysisView.vue'
+import CbcInputsView from '@/views/system/CbcInputsView.vue'
 // 👉 Routes
 export const routesPath = [
     // Auth Pages
@@ -33,6 +34,12 @@ export const routesPath = [
         path: '/dashboard',
         name: 'dashboard',
         component: DashboardView,
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/cbc-inputs',
+        name: 'cbc-inputs',
+        component: CbcInputsView,
         meta: { requiresAuth: true }
     },
     {
