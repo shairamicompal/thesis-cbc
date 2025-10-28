@@ -251,7 +251,7 @@ ${abnormals}
 `.trim()
 }
 
-/* ------------ Supabase saver (kept for future; call is commented in onSubmit) ------------ */
+/* ------------ Supabase saver (silent by default) ------------ */
 function normRatioSend(v) {
   if (v === '' || v == null) return ''
   const n = Number(v)
@@ -265,7 +265,7 @@ function normHctSend(v) {
   return n > 1.5 ? Number((n / 100).toFixed(2)) : n
 }
 
-async function saveToHistory(prompt, resultMarkdown) {
+async function saveToHistory(prompt, resultMarkdown, { silent = true } = {}) {
   const { data: authData } = await supabase.auth.getUser()
   if (!authData?.user) throw new Error('You must be signed in to save results.')
 
@@ -303,7 +303,13 @@ async function saveToHistory(prompt, resultMarkdown) {
     const { data, error } = await supabase.rpc('save_interpretation', { payload })
     if (error) throw error
     lastSavedIds.value = Array.isArray(data) ? data[0] : null
-    successMsg.value = 'Saved to history.'
+
+    // Silent by default: no success banner. Use console for dev confirmation.
+    if (silent) console.debug('Saved interpretation (silent):', lastSavedIds.value)
+    else {
+      successMsg.value = 'Saved to history.'
+      setTimeout(() => (successMsg.value = ''), 2500)
+    }
   } finally {
     saving.value = false
   }
@@ -347,8 +353,8 @@ async function onSubmit() {
     const raw = provider.value === 'openai' ? await callOpenAI(prompt) : await callGroq(prompt)
     aiResult.value = stripThink(raw)
 
-    // Auto-save after interpretation (DISABLED for now)
-    await saveToHistory(prompt, aiResult.value)
+    // Auto-save after interpretation (silent)
+    await saveToHistory(prompt, aiResult.value, { silent: true })
   } catch (e) {
     console.error(e)
     errorMsg.value = String(e?.message || e || 'Something went wrong.')
