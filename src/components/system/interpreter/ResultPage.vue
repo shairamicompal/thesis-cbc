@@ -8,13 +8,19 @@ const props = defineProps({
   provider: { type: String, default: '' }, // 'groq' | 'openai'
   model: { type: String, default: '' }, // 'qwen/qwen3-32b' | 'gpt-4o' ...
   loading: { type: Boolean, default: false },
+  saving: { type: Boolean, default: false },
+  canSave: { type: Boolean, default: false },
+
+  // feedback from parent after save
+  saveSuccess: { type: String, default: '' },
+  saveError: { type: String, default: '' },
 
   // patient details
   patientAge: { type: [String, Number], default: '' },
   patientSex: { type: String, default: '' }, // 'M' | 'F' | ''
 })
 
-const emit = defineEmits(['back'])
+const emit = defineEmits(['back', 'save'])
 
 const providerLabel = computed(() => {
   if (props.provider === 'openai') return 'ChatGPT 4o (OpenAI)'
@@ -31,6 +37,11 @@ const sexLabel = computed(() => {
 
 function onBack() {
   emit('back')
+}
+
+function onSave() {
+  if (!props.canSave || props.saving) return
+  emit('save')
 }
 </script>
 
@@ -56,8 +67,14 @@ function onBack() {
       </v-chip>
     </div>
 
-    <v-alert v-if="loading" type="info" variant="tonal" class="mb-3">
-      Saving or finishing up…
+    <!-- Loading / Saving -->
+    <v-alert
+      v-if="loading || saving"
+      type="info"
+      variant="tonal"
+      class="mb-3"
+    >
+      {{ loading ? 'Generating interpretation…' : 'Saving to history…' }}
     </v-alert>
 
     <!-- Result card -->
@@ -94,13 +111,58 @@ function onBack() {
         </div>
 
         <!-- AI result -->
-        <div v-html="htmlResult" class="ai-markdown"></div>
+        <div v-html="htmlResult" class="ai-markdown mb-5"></div>
+
+        <!-- Bottom action buttons -->
+        <div class="d-flex justify-end flex-wrap ga-2 mt-6">
+          <v-btn
+            color="primary"
+            :disabled="!canSave || saving"
+            :loading="saving"
+            prepend-icon="mdi-content-save"
+            @click="onSave"
+          >
+            Save to History
+          </v-btn>
+        </div>
+
+        <!-- Feedback messages (below button) -->
+        <transition name="fade">
+          <v-alert
+            v-if="saveSuccess"
+            type="success"
+            variant="tonal"
+            class="mt-3"
+          >
+            {{ saveSuccess }}
+          </v-alert>
+        </transition>
+
+        <transition name="fade">
+          <v-alert
+            v-if="saveError"
+            type="error"
+            variant="tonal"
+            class="mt-3"
+          >
+            {{ saveError }}
+          </v-alert>
+        </transition>
       </v-card-text>
     </v-card>
   </div>
 </template>
 
 <style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.4s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
 .ai-markdown {
   font-family: 'Poppins', sans-serif;
   line-height: 1.6;
@@ -123,7 +185,7 @@ function onBack() {
   font-weight: 600;
 }
 
-/* Patient banner (theme adaptive) */
+/* Patient banner */
 .patient-banner {
   display: flex;
   align-items: center;
@@ -217,5 +279,4 @@ function onBack() {
     align-self: center;
   }
 }
-
 </style>

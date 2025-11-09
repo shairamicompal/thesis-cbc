@@ -363,14 +363,16 @@ ${abnormals}
 `.trim()
 }
 
-/* ------------ Supabase saver ------------ */
+/* ------------ Supabase saver (UPDATED) ------------ */
 const clamp01Send = (x) => clamp01(x)
+
 function normRatioSend(v) {
   if (v === '' || v == null) return ''
   const n = Number(v)
   if (isNaN(n)) return ''
   return clamp01Send(n > 1 ? n / 100 : n)
 }
+
 function normHctSend(v) {
   if (v === '' || v == null) return ''
   const n = Number(v)
@@ -378,21 +380,27 @@ function normHctSend(v) {
   return n > 1.5 ? Number((n / 100).toFixed(2)) : n
 }
 
-async function saveToHistory(prompt, resultMarkdown, { silent = true } = {}) {
+// Save inputs + interpretation into cbc.tests + cbc.interpretations
+async function saveInterpretationRPC(prompt, resultMarkdown) {
   const { data: authData } = await supabase.auth.getUser()
-  if (!authData?.user) throw new Error('You must be signed in to save results.')
+
+  // If not logged in, allow viewing result but don't persist
+  if (!authData?.user) {
+    lastSavedIds.value = null
+    return
+  }
 
   const payload = {
-    age: form.value.age,
+    age: Number(form.value.age),
     sex: form.value.sex,
-    wbc: form.value.wbc,
-    rbc: form.value.rbc,
-    hb: form.value.hb,
+    wbc: Number(form.value.wbc),
+    rbc: Number(form.value.rbc),
+    hb: Number(form.value.hb),
     hct: normHctSend(form.value.hct),
-    mcv: form.value.mcv,
-    mch: form.value.mch,
-    mchc: form.value.mchc,
-    plt: form.value.plt,
+    mcv: Number(form.value.mcv),
+    mch: Number(form.value.mch),
+    mchc: Number(form.value.mchc),
+    plt: Number(form.value.plt),
 
     neutrophils: form.value.neutrophils === '' ? '' : normRatioSend(form.value.neutrophils),
     lymphocytes: form.value.lymphocytes === '' ? '' : normRatioSend(form.value.lymphocytes),
@@ -405,10 +413,6 @@ async function saveToHistory(prompt, resultMarkdown, { silent = true } = {}) {
 
     prompt,
     result_markdown: resultMarkdown,
-
-    // NEW: timestamp of interpretation (ensure your DB & RPC accept this)
-    taken_at: resultMeta.value.takenAt || null,
-
     tokens_in: '',
     tokens_out: '',
     latency_ms: '',
@@ -417,16 +421,63 @@ async function saveToHistory(prompt, resultMarkdown, { silent = true } = {}) {
   saving.value = true
   try {
     const { data, error } = await supabase.rpc('save_interpretation', { payload })
-    if (error) throw error
-    lastSavedIds.value = Array.isArray(data) ? data[0] : null
-    if (silent) {
-      console.debug('Saved interpretation (silent):', lastSavedIds.value)
+    if (error) {
+      console.error('save_interpretation error:', error)
+      lastSavedIds.value = null
+      return
+    }
+
+    if (Array.isArray(data) && data.length > 0) {
+      lastSavedIds.value = {
+        test_id: data[0].test_id,
+        interpretation_id: data[0].interpretation_id,
+      }
     } else {
-      successMsg.value = 'Saved to history.'
-      setTimeout(() => (successMsg.value = ''), 2500)
+      lastSavedIds.value = null
     }
   } finally {
     saving.value = false
+  }
+}
+
+// Save bookmark into cbc.saved_history
+async function handleSaveHistory() {
+  errorMsg.value = ''
+  successMsg.value = ''
+
+  if (!lastSavedIds.value?.test_id || !lastSavedIds.value?.interpretation_id) {
+    errorMsg.value = 'No interpretation to save. Please run an analysis first.'
+    return
+  }
+
+  const { data: authData } = await supabase.auth.getUser()
+  if (!authData?.user) {
+    errorMsg.value = 'You must be signed in to save to history.'
+    return
+  }
+
+  saving.value = true
+  try {
+    const { error } = await supabase.rpc('save_cbc_history', {
+      p_test_id: lastSavedIds.value.test_id,
+      p_interpretation_id: lastSavedIds.value.interpretation_id,
+    })
+
+    if (error) {
+      console.error(error)
+      throw error
+    }
+
+    successMsg.value = 'Saved to History.'
+  } catch (e) {
+    console.error(e)
+    errorMsg.value = 'Could not save to history. Please try again.'
+  } finally {
+    saving.value = false
+    setTimeout(() => {
+      successMsg.value = ''
+      errorMsg.value = ''
+    }, 2500)
   }
 }
 
@@ -479,8 +530,8 @@ async function onSubmit() {
       takenAt: new Date().toISOString(),
     }
 
-    // Auto-save to history (silent)
-    await saveToHistory(prompt, aiResult.value, { silent: true })
+    // Save test + interpretation (if logged in) & capture IDs
+    await saveInterpretationRPC(prompt, aiResult.value)
 
     // Show result view
     showResult.value = true
@@ -871,10 +922,15 @@ const basoRules = [numberRule, ratioHardRule]
                   :raw-markdown="aiResult"
                   :provider="provider"
                   :model="provider === 'openai' ? OPENAI_MODEL : GROQ_MODEL"
-                  :loading="loading || saving"
+                  :loading="loading"
+                  :saving="saving"
+                  :can-save="!!lastSavedIds"
                   :patient-age="resultMeta.age"
                   :patient-sex="resultMeta.sex"
+                  :save-success="successMsg"
+                  :save-error="errorMsg"
                   @back="showResult = false"
+                  @save="handleSaveHistory"
                 />
               </v-card-text>
             </v-card>
