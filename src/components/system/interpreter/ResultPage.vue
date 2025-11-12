@@ -1,282 +1,415 @@
 <!-- src/components/system/interpreter/ResultPage.vue -->
 <script setup>
 import { computed } from 'vue'
+import { useAuthUserStore } from '@/stores/authUser'
 
 const props = defineProps({
-  htmlResult: { type: String, required: true }, // pre-sanitized HTML
+  htmlResult: { type: String, default: '' },
   rawMarkdown: { type: String, default: '' },
-  provider: { type: String, default: '' }, // 'groq' | 'openai'
-  model: { type: String, default: '' }, // 'qwen/qwen3-32b' | 'gpt-4o' ...
+  provider: { type: String, default: '' },
+  model: { type: String, default: '' },
   loading: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
   canSave: { type: Boolean, default: false },
 
-  // feedback from parent after save
+  patientAge: { type: [String, Number], default: '' },
+  patientSex: { type: String, default: '' },
+
+  labName: { type: String, default: '' },
+  labCity: { type: String, default: '' },
+  labCountry: { type: String, default: '' },
+  testDate: { type: String, default: '' },
+
   saveSuccess: { type: String, default: '' },
   saveError: { type: String, default: '' },
 
-  // patient details
-  patientAge: { type: [String, Number], default: '' },
-  patientSex: { type: String, default: '' }, // 'M' | 'F' | ''
+  summaryItems: { type: Array, default: () => [] },
+  chipColorFn: { type: Function, default: () => '' },
+  fmtValFn: {
+    type: Function,
+    default: (item) =>
+      item && item.value !== undefined ? item.value : '—',
+  },
 })
 
 const emit = defineEmits(['back', 'save'])
+const authUser = useAuthUserStore()
 
+/* --------- Computed: patient info --------- */
+const patientName = computed(() => {
+  const meta = authUser?.userData || {}
+  const first =
+    meta.firstname ||
+    meta.first_name ||
+    meta.firstName ||
+    meta.given_name ||
+    ''
+  const last =
+    meta.lastname ||
+    meta.last_name ||
+    meta.lastName ||
+    meta.family_name ||
+    ''
+  const full = `${first} ${last}`.trim()
+  return full || meta.full_name || meta.name || ''
+})
+
+/* --------- AI provider label --------- */
 const providerLabel = computed(() => {
   if (props.provider === 'openai') return 'ChatGPT 4o (OpenAI)'
   if (props.provider === 'groq') return 'Qwen3-32B (Groq)'
-  return props.provider
+  return props.provider || 'AI Interpreter'
 })
 
-const sexLabel = computed(() => {
-  if (!props.patientSex) return ''
-  if (props.patientSex === 'M') return 'Male'
-  if (props.patientSex === 'F') return 'Female'
-  return props.patientSex
+/* --------- Meta info --------- */
+const labLocation = computed(() => {
+  const parts = [props.labCity, props.labCountry].filter(Boolean)
+  return parts.join(', ')
 })
 
-function onBack() {
-  emit('back')
-}
+const displayTestDate = computed(() => {
+  if (!props.testDate) return ''
+  return props.testDate.includes('T')
+    ? props.testDate.split('T')[0]
+    : props.testDate
+})
 
-function onSave() {
-  if (!props.canSave || props.saving) return
-  emit('save')
+const hasCBCSummary = computed(() => (props.summaryItems || []).length > 0)
+
+/* --------- Helper: ref formatting for differentials --------- */
+const isDiffKey = (k) =>
+  ['neut', 'lymph', 'mono', 'eos', 'baso'].includes(k)
+
+const formatRef = (item) => {
+  // For differentials, show as %
+  if (isDiffKey(item.key)) {
+    const low = item.low ?? ''
+    const high = item.high ?? ''
+    if (!isFinite(low) || !isFinite(high)) return ''
+    return `${(low * 100).toFixed(0)}–${(high * 100).toFixed(0)} %`
+  }
+
+  // For regular items, show standard
+  const low = item.low ?? ''
+  const high = item.high ?? ''
+  const unit = item.unit || ''
+  if (low === '' && high === '') return unit ? unit : ''
+  return `${low}–${high} ${unit}`.trim()
 }
 </script>
 
 <template>
-  <div>
+  <div class="result-wrapper">
     <!-- Top bar -->
-    <div class="d-flex align-center justify-space-between mb-3">
-      <div class="d-flex align-center ga-3">
-        <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="onBack">
+    <v-card-title class="d-flex justify-space-between align-center gap-3">
+      <div class="d-flex align-center gap-2">
+        <v-btn
+          variant="outlined"
+          size="small"
+          class="back-btn"
+          @click="emit('back')"
+        >
+          <v-icon start>mdi-arrow-left</v-icon>
           Back
         </v-btn>
       </div>
 
-      <v-chip
-        variant="flat"
-        color="#b70d37"
-        class="responsive-chip text-truncate"
-        :title="providerLabel + ' • ' + model"
-      >
-        <span class="chip-text">
-          {{ providerLabel }} • {{ model }}
-        </span>
-      </v-chip>
-    </div>
-
-    <!-- Loading / Saving -->
-    <v-alert
-      v-if="loading || saving"
-      type="info"
-      variant="tonal"
-      class="mb-3"
-    >
-      {{ loading ? 'Generating interpretation…' : 'Saving to history…' }}
-    </v-alert>
-
-    <!-- Result card -->
-    <v-card rounded="xl" variant="flat">
-      <v-card-text>
-        <!-- Patient profile banner -->
-        <div
-          v-if="patientAge !== '' || sexLabel"
-          class="patient-banner mb-4"
+      <div class="d-flex align-center gap-2">
+        <v-chip
+          size="small"
+          color="#0D47A1"
+          variant="elevated"
+          class="text-white"
         >
-          <div class="patient-left">
-            <div class="patient-label mb-2">
-              Patient Profile
-            </div>
-            <div class="patient-pills">
-              <div v-if="patientAge !== ''" class="pill">
-                <v-icon size="16" class="pill-icon">mdi-cake-variant</v-icon>
-                <span class="pill-label me-2">Age:</span>
-                <span class="pill-value">{{ patientAge }}</span>
-              </div>
+          {{ providerLabel }}
+        </v-chip>
+      </div>
+    </v-card-title>
 
-              <div v-if="sexLabel" class="pill">
-                <v-icon size="16" class="pill-icon">mdi-gender-male-female</v-icon>
-                <span class="pill-label me-2">Sex:</span>
-                <span class="pill-value">{{ sexLabel }}</span>
-              </div>
+    <v-card-text>
+      <!-- Patient & Lab Summary -->
+      <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
+        <v-row dense>
+          <v-col cols="12" md="4">
+            <div class="meta-label">Patient Name</div>
+            <div class="meta-value">
+              {{ patientName || 'Not set in profile' }}
             </div>
-          </div>
+          </v-col>
 
-          <!-- subtle side icon -->
-          <div class="patient-icon-wrap">
-            <v-icon size="24">mdi-water-plus</v-icon>
-          </div>
+          <v-col cols="6" md="2">
+            <div class="meta-label">Age</div>
+            <div class="meta-value">{{ patientAge || '—' }}</div>
+          </v-col>
+
+          <v-col cols="6" md="2">
+            <div class="meta-label">Sex</div>
+            <div class="meta-value">{{ patientSex || '—' }}</div>
+          </v-col>
+
+          <v-col cols="12" md="4">
+            <div class="meta-label">Laboratory Name</div>
+            <div class="meta-value">{{ labName || '—' }}</div>
+          </v-col>
+
+          <v-col cols="12" md="4">
+            <div class="meta-label">Laboratory Location</div>
+            <div class="meta-value">{{ labLocation || '—' }}</div>
+          </v-col>
+
+          <v-col cols="6" md="2">
+            <div class="meta-label">Test Date</div>
+            <div class="meta-value">{{ displayTestDate || '—' }}</div>
+          </v-col>
+
+          <v-col cols="6" md="2">
+            <div class="meta-label">Country</div>
+            <div class="meta-value">{{ labCountry || '—' }}</div>
+          </v-col>
+        </v-row>
+      </v-sheet>
+
+      <!-- CBC Summary -->
+      <v-sheet
+        v-if="hasCBCSummary"
+        class="cbc-summary-sheet mt-4"
+        rounded="xl"
+        variant="outlined"
+      >
+        <div
+          class="cbc-summary-header d-flex align-center gap-2 mb-2"
+        >
+          <v-icon size="18" class="me-2"
+            >mdi-clipboard-pulse-outline</v-icon
+          >
+          <h3>Status Overview</h3>
         </div>
 
-        <!-- AI result -->
-        <div v-html="htmlResult" class="ai-markdown mb-5"></div>
-
-        <!-- Bottom action buttons -->
-        <div class="d-flex justify-end flex-wrap ga-2 mt-6">
-          <v-btn
-            color="primary"
-            :disabled="!canSave || saving"
-            :loading="saving"
-            prepend-icon="mdi-content-save"
-            @click="onSave"
+        <v-row dense>
+          <v-col
+            v-for="item in summaryItems"
+            :key="item.key"
+            cols="12"
+            sm="6"
+            md="4"
+            lg="3"
+            class="mb-1"
           >
+            <div class="cbc-item">
+              <div class="cbc-label">{{ item.label }}</div>
+              <div class="cbc-value-line">
+                <span class="cbc-value">
+                  {{ fmtValFn(item) }}
+                </span>
+                <v-chip
+                  v-if="item.status && item.status !== '—'"
+                  :color="chipColorFn(item.status)"
+                  size="x-small"
+                  variant="elevated"
+                  class="status-chip text-uppercase font-weight-bold"
+                >
+                  {{ item.status }}
+                </v-chip>
+              </div>
+              <div class="cbc-ref">
+                Ref: {{ formatRef(item) }}
+              </div>
+            </div>
+          </v-col>
+        </v-row>
+      </v-sheet>
+
+      <!-- Loading -->
+      <v-progress-linear
+        v-if="loading || saving"
+        indeterminate
+        class="mt-4"
+      />
+
+      <!-- AI Interpretation -->
+      <div class="mt-6 ai-section">
+        <div class="ai-header d-flex align-center gap-2 mb-2">
+          <v-icon color="#b70d37" class="me-2"
+            >mdi-robot-outline</v-icon
+          >
+          <span class="ai-title">AI-Assisted Explanation</span>
+        </div>
+
+        <v-alert
+          type="warning"
+          variant="tonal"
+          density="comfortable"
+          class="mb-4"
+        >
+          This explanation is for educational support only and must
+          not replace assessment by a licensed physician. If you feel
+          unwell or your results are significantly abnormal, please
+          consult your doctor.
+        </v-alert>
+
+        <div
+          v-if="htmlResult"
+          class="ai-markdown"
+          v-html="htmlResult"
+        />
+
+        <div v-else class="text-grey-darken-1 text-body-2">
+          No interpretation available. Please go back and run the
+          analysis again.
+        </div>
+      </div>
+
+      <!-- Save buttons + messages -->
+      <div
+        class="mt-6 d-flex flex-wrap gap-3 justify-space-between align-center"
+      >
+        <div>
+          <v-btn
+            v-if="canSave"
+            color="#0D47A1"
+            class="save-btn text-white"
+            :loading="saving"
+            :disabled="saving"
+            @click="emit('save')"
+          >
+            <v-icon start>mdi-content-save-outline</v-icon>
             Save to History
           </v-btn>
         </div>
 
-        <!-- Feedback messages (below button) -->
-        <transition name="fade">
+        <div class="flex-grow-1 d-flex justify-end">
           <v-alert
             v-if="saveSuccess"
             type="success"
             variant="tonal"
-            class="mt-3"
+            density="compact"
+            class="status-alert mt-4"
           >
             {{ saveSuccess }}
           </v-alert>
-        </transition>
-
-        <transition name="fade">
           <v-alert
-            v-if="saveError"
+            v-else-if="saveError"
             type="error"
             variant="tonal"
-            class="mt-3"
+            density="compact"
+            class="status-alert"
           >
             {{ saveError }}
           </v-alert>
-        </transition>
-      </v-card-text>
-    </v-card>
+        </div>
+      </div>
+    </v-card-text>
   </div>
 </template>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.4s ease;
+.result-wrapper {
+  width: 100%;
 }
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+
+/* Buttons */
+.back-btn,
+.save-btn {
+  text-transform: none;
+  border-radius: 999px;
+}
+
+/* Meta section */
+.meta-sheet {
+  padding: 10px 20px;
+  border: 2px solid #0d47a1;
+}
+
+.meta-label {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.meta-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* CBC Summary */
+.cbc-summary-sheet {
+  padding: 10px 14px;
+}
+
+.cbc-summary-header {
+  font-size: 0.8rem;
+}
+
+.cbc-item {
+  padding: 4px 0;
+}
+
+.cbc-label {
+  font-size: 0.75rem;
+}
+
+.cbc-value-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cbc-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.cbc-ref {
+  font-size: 0.68rem;
+}
+
+.status-chip {
+  font-size: 0.6rem;
+}
+
+/* AI Section */
+.ai-section {
+  margin-top: 18px;
+}
+
+.ai-header .ai-title {
+  font-weight: 600;
+  font-size: 0.98rem;
 }
 
 .ai-markdown {
-  font-family: 'Poppins', sans-serif;
+  font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont,
+    sans-serif;
   line-height: 1.6;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
 }
+
+.ai-markdown h3,
 .ai-markdown h2 {
-  margin: 0.35rem 0 0.45rem;
+  margin-top: 0.6rem;
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
   font-weight: 700;
-  font-size: 1.02rem;
+  color: #0d47a1;
 }
+
 .ai-markdown ul,
 .ai-markdown ol {
-  margin: 0.25rem 0 0.55rem;
+  margin: 0.25rem 0 0.45rem;
   padding-left: 1.25rem;
 }
+
 .ai-markdown li {
-  margin: 0.18rem 0;
+  margin: 0.12rem 0;
 }
+
 .ai-markdown strong {
   font-weight: 600;
 }
 
-/* Patient banner */
-.patient-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border-radius: 16px;
-  background-color: var(--v-theme-surface);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-  transition: background-color 0.3s ease;
-  border: 2px solid #b70d37;
-}
-
-.patient-left {
-  display: flex;
-  flex-direction: column;
-  gap: 0.18rem;
-}
-
-.patient-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  font-weight: 200;
-}
-
-.patient-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.22rem 0.6rem;
-  border-radius: 999px;
-  background-color: #c54a69;
-  font-size: 0.78rem;
-  color: var(--v-theme-on-surface);
-}
-
-.pill-icon {
-  margin-right: 0.18rem;
-}
-
-.pill-label {
-  font-weight: 500;
-  margin-right: 0.15rem;
-  opacity: 0.8;
-}
-
-.pill-value {
-  font-weight: 600;
-}
-
-.patient-icon-wrap {
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(183, 13, 55, 0.1);
-  color: #b70d37;
-}
-
-/* Provider chip */
-.responsive-chip {
-  max-width: 350px;
-  font-size: 0.8rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.chip-text {
-  display: inline-block;
-  max-width: 100%;
-}
-
-@media (max-width: 600px) {
-  .responsive-chip {
-    max-width: 260px;
-    font-size: 0.7rem;
-  }
-  .patient-banner {
-    flex-direction: row;
-    align-items: flex-start;
-  }
-  .patient-icon-wrap {
-    align-self: center;
-  }
+.status-alert {
+  min-width: 180px;
 }
 </style>

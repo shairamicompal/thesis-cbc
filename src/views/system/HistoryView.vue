@@ -7,7 +7,9 @@ import { ref, onMounted, computed } from 'vue'
 import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import { renderMarkdownSafe } from '@/utils/markdown'
+import { useAuthUserStore } from '@/stores/authUser'
 
+const authUser = useAuthUserStore()
 const { mobile } = useDisplay()
 const isDrawerVisible = ref(true)
 
@@ -37,7 +39,7 @@ const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref('success')
 
-/* ---------- helpers ---------- */
+/* ---------- tiny helpers ---------- */
 
 function sexLabel(sex) {
   if (!sex) return '—'
@@ -69,17 +71,212 @@ function formattedDate(ts) {
   return new Date(ts).toLocaleString()
 }
 
+function showSnackbar(message, color = 'success') {
+  snackbarMessage.value = message
+  snackbarColor.value = color
+  snackbar.value = true
+}
+
 function preview(md, length = 90) {
   if (!md) return ''
   const text = md.replace(/[#*_`>-]+/g, ' ').replace(/\s+/g, ' ').trim()
   return text.length > length ? text.slice(0, length) + '…' : text
 }
 
-function showSnackbar(message, color = 'success') {
-  snackbarMessage.value = message
-  snackbarColor.value = color
-  snackbar.value = true
+/* ---------- RANGES & SUMMARY (reuse of ResultPage logic) ---------- */
+const ranges = {
+  wbc:   { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
+  rbcM:  { low: 4.5, high: 5.2, unit: '×10¹²/L', label: 'RBC' },
+  rbcF:  { low: 3.4, high: 5.6, unit: '×10¹²/L', label: 'RBC' },
+  hbM:   { low: 135, high: 175, unit: 'g/L',     label: 'Hemoglobin' },
+  hbF:   { low: 125, high: 155, unit: 'g/L',     label: 'Hemoglobin' },
+  hctM:  { low: 0.40, high: 0.52, unit: 'L/L',   label: 'Hematocrit' },
+  hctF:  { low: 0.36, high: 0.48, unit: 'L/L',   label: 'Hematocrit' },
+  mcv:   { low: 82,  high: 92,   unit: 'fL',     label: 'MCV' },
+  mch:   { low: 27,  high: 32,   unit: 'pg',     label: 'MCH' },
+  mchc:  { low: 320, high: 380,  unit: 'g/L',    label: 'MCHC' },
+  plt:   { low: 150, high: 400,  unit: '×10⁹/L', label: 'Platelets' },
+  neut:  { low: 0.50, high: 0.70, unit: '',      label: 'Neutrophils' },
+  lymph: { low: 0.20, high: 0.40, unit: '',      label: 'Lymphocytes' },
+  mono:  { low: 0.02, high: 0.06, unit: '',      label: 'Monocytes' },
+  eos:   { low: 0.02, high: 0.05, unit: '',      label: 'Eosinophils' },
+  baso:  { low: 0.00, high: 0.01, unit: '',      label: 'Basophils' },
 }
+
+const isDiffKey = (k) => ['neut', 'lymph', 'mono', 'eos', 'baso'].includes(k)
+const parseNum = (v) => (v === '' || v == null ? NaN : Number(v))
+const getStatus = (val, low, high) => {
+  if (!isFinite(val)) return '—'
+  if (val < low) return 'Low'
+  if (val > high) return 'High'
+  return 'Normal'
+}
+const chipColor = (status) =>
+  status === 'Low' ? 'error'
+  : status === 'High' ? 'warning'
+  : status === 'Normal' ? 'success'
+  : undefined
+
+const fmtVal = (item) => {
+  if (!isFinite(item.value)) return '—'
+  if (isDiffKey(item.key)) return `${(item.value * 100).toFixed(0)} %`
+  return `${item.value} ${item.unit || ''}`.trim()
+}
+
+function formatRef(item) {
+  if (isDiffKey(item.key)) {
+    const low = item.low ?? ''
+    const high = item.high ?? ''
+    if (!isFinite(low) || !isFinite(high)) return ''
+    return `${(low * 100).toFixed(0)}–${(high * 100).toFixed(0)} %`
+  }
+  const low = item.low ?? ''
+  const high = item.high ?? ''
+  const unit = item.unit || ''
+  if (low === '' && high === '') return unit ? unit : ''
+  return `${low}–${high} ${unit}`.trim()
+}
+
+/* Build CBC summary items from a history row */
+const selectedSummaryItems = computed(() => {
+  const row = selectedItem.value
+  if (!row) return []
+  const s = row.test_sex === 'M' ? 'M' : 'F'
+
+  const pack = [
+    {
+      key: 'wbc',
+      ...ranges.wbc,
+      value: parseNum(row.wbc),
+      status: getStatus(parseNum(row.wbc), ranges.wbc.low, ranges.wbc.high),
+    },
+    {
+      key: 'rbc',
+      ...(s === 'M' ? ranges.rbcM : ranges.rbcF),
+      value: parseNum(row.rbc),
+      status: getStatus(
+        parseNum(row.rbc),
+        s === 'M' ? ranges.rbcM.low : ranges.rbcF.low,
+        s === 'M' ? ranges.rbcM.high : ranges.rbcF.high
+      ),
+    },
+    {
+      key: 'hb',
+      ...(s === 'M' ? ranges.hbM : ranges.hbF),
+      value: parseNum(row.hb),
+      status: getStatus(
+        parseNum(row.hb),
+        s === 'M' ? ranges.hbM.low : ranges.hbF.low,
+        s === 'M' ? ranges.hbM.high : ranges.hbF.high
+      ),
+    },
+    {
+      key: 'hct',
+      ...(s === 'M' ? ranges.hctM : ranges.hctF),
+      value: parseNum(row.hct),
+      status: getStatus(
+        parseNum(row.hct),
+        s === 'M' ? ranges.hctM.low : ranges.hctF.low,
+        s === 'M' ? ranges.hctM.high : ranges.hctF.high
+      ),
+    },
+    {
+      key: 'mcv',
+      ...ranges.mcv,
+      value: parseNum(row.mcv),
+      status: getStatus(parseNum(row.mcv), ranges.mcv.low, ranges.mcv.high),
+    },
+    {
+      key: 'mch',
+      ...ranges.mch,
+      value: parseNum(row.mch),
+      status: getStatus(parseNum(row.mch), ranges.mch.low, ranges.mch.high),
+    },
+    {
+      key: 'mchc',
+      ...ranges.mchc,
+      value: parseNum(row.mchc),
+      status: getStatus(parseNum(row.mchc), ranges.mchc.low, ranges.mchc.high),
+    },
+    {
+      key: 'plt',
+      ...ranges.plt,
+      value: parseNum(row.plt),
+      status: getStatus(parseNum(row.plt), ranges.plt.low, ranges.plt.high),
+    },
+    {
+      key: 'neut',
+      ...ranges.neut,
+      value: parseNum(row.neutrophils),
+      status: getStatus(parseNum(row.neutrophils), ranges.neut.low, ranges.neut.high),
+    },
+    {
+      key: 'lymph',
+      ...ranges.lymph,
+      value: parseNum(row.lymphocytes),
+      status: getStatus(parseNum(row.lymphocytes), ranges.lymph.low, ranges.lymph.high),
+    },
+    {
+      key: 'mono',
+      ...ranges.mono,
+      value: parseNum(row.monocytes),
+      status: getStatus(parseNum(row.monocytes), ranges.mono.low, ranges.mono.high),
+    },
+    {
+      key: 'eos',
+      ...ranges.eos,
+      value: parseNum(row.eosinophils),
+      status: getStatus(parseNum(row.eosinophils), ranges.eos.low, ranges.eos.high),
+    },
+    {
+      key: 'baso',
+      ...ranges.baso,
+      value: parseNum(row.basophils),
+      status: getStatus(parseNum(row.basophils), ranges.baso.low, ranges.baso.high),
+    },
+  ]
+
+  return pack
+})
+
+/* ---------- meta computed for detail ---------- */
+const selectedHtml = computed(() => {
+  if (!selectedItem.value?.result_markdown) return ''
+  return renderMarkdownSafe(selectedItem.value.result_markdown)
+})
+
+/* -------- patient name (match ResultPage) -------- */
+const patientName = computed(() => {
+  const meta = authUser?.userData || {}
+  const first =
+    meta.firstname ||
+    meta.first_name ||
+    meta.firstName ||
+    meta.given_name ||
+    ''
+  const last =
+    meta.lastname ||
+    meta.last_name ||
+    meta.lastName ||
+    meta.family_name ||
+    ''
+  const full = `${first} ${last}`.trim()
+  return full || meta.full_name || meta.name || ''
+})
+
+const labLocation = computed(() => {
+  const row = selectedItem.value || {}
+  const parts = [row.test_lab_city, row.test_lab_country].filter(Boolean)
+  return parts.join(', ')
+})
+
+const displayTestDate = computed(() => {
+  const row = selectedItem.value || {}
+  if (!row.test_date) return ''
+  return String(row.test_date).includes('T') ? String(row.test_date).split('T')[0] : row.test_date
+})
+
+const hasCBCSummary = computed(() => (selectedSummaryItems.value || []).length > 0)
 
 /* ---------- data ---------- */
 
@@ -88,12 +285,15 @@ async function fetchHistory() {
   errorMsg.value = ''
 
   const { data, error } = await supabase.rpc('get_cbc_history')
-
   if (error) {
     console.error('get_cbc_history error', error)
     errorMsg.value = 'Failed to load history.'
     items.value = []
   } else {
+    // Expecting fields like:
+    // id, created_at, pinned, provider, model, result_markdown,
+    // test_age, test_sex, test_lab_name, test_lab_city, test_lab_country, test_date,
+    // wbc, rbc, hb, hct, mcv, mch, mchc, plt, neutrophils, lymphocytes, monocytes, eosinophils, basophils
     items.value = data || []
   }
 
@@ -108,22 +308,15 @@ async function fetchHistory() {
  */
 const filteredItems = computed(() => {
   let base = items.value
-
   if (activeProvider.value !== 'all') {
     base = base.filter((row) => row.provider === activeProvider.value)
   }
-
   return [...base].sort((a, b) => {
     if (a.pinned === b.pinned) {
       return new Date(b.created_at) - new Date(a.created_at)
     }
     return a.pinned ? -1 : 1
   })
-})
-
-const selectedHtml = computed(() => {
-  if (!selectedItem.value?.result_markdown) return ''
-  return renderMarkdownSafe(selectedItem.value.result_markdown)
 })
 
 /* ---------- navigation ---------- */
@@ -156,11 +349,9 @@ async function togglePinned(row, event) {
     showSnackbar('Could not update pin status.', 'error')
   } else {
     row.pinned = newPinned
-
     if (selectedItem.value && selectedItem.value.id === row.id) {
       selectedItem.value.pinned = newPinned
     }
-
     showSnackbar(newPinned ? 'Report pinned.' : 'Report unpinned.', 'success')
   }
 
@@ -222,7 +413,6 @@ async function confirmBulkDelete() {
   if (!hasSelection.value) return
 
   bulkDeleteLoading.value = true
-
   const idsToDelete = [...selectedIds.value]
 
   const blocked = items.value.filter(
@@ -275,10 +465,7 @@ onMounted(fetchHistory)
     @is-drawer-visible="isDrawerVisible = !isDrawerVisible"
   >
     <template #navigation>
-      <SideNavi
-        v-if="!mobile"
-        :is-drawer-visible="isDrawerVisible"
-      />
+      <SideNavi v-if="!mobile" :is-drawer-visible="isDrawerVisible" />
     </template>
 
     <template #content>
@@ -289,12 +476,7 @@ onMounted(fetchHistory)
           <div class="history-header mb-2">
             <div class="d-flex align-center ga-2">
               <h2 class="text-h5 font-weight-bold history-title">
-                 <v-icon
-                      size="20"
-                      color="light-blue-lighten-3"
-                           >
-                         mdi-history
-                   </v-icon>
+                <v-icon size="20" color="blue-darken-1">mdi-history</v-icon>
                 {{
                   selectionMode
                     ? (hasSelection ? `${selectedIds.length} Selected` : 'Select Reports')
@@ -328,18 +510,12 @@ onMounted(fetchHistory)
             </div>
           </div>
 
-          <p
-            v-if="!selectionMode"
-            class="text-body-2 mb-3 text-grey-darken-1 mb-6"
-          >
+          <p v-if="!selectionMode" class="text-body-2 mb-3 text-grey-darken-1 mb-6">
             Browse your saved CBC interpretations. Tap an entry to open the full report.
           </p>
 
           <!-- Filter Pills -->
-          <div
-            v-if="!selectionMode"
-            class="filters-wrapper mb-4"
-          >
+          <div v-if="!selectionMode" class="filters-wrapper mb-4">
             <v-btn
               variant="flat"
               class="filter-pill"
@@ -367,40 +543,21 @@ onMounted(fetchHistory)
           </div>
 
           <!-- Error -->
-          <v-alert
-            v-if="errorMsg"
-            type="error"
-            variant="tonal"
-            class="mb-4"
-          >
+          <v-alert v-if="errorMsg" type="error" variant="tonal" class="mb-4">
             {{ errorMsg }}
           </v-alert>
 
           <!-- Loading -->
-          <v-skeleton-loader
-            v-if="loading"
-            type="card, card, card"
-            class="mb-4"
-          />
+          <v-skeleton-loader v-if="loading" type="card, card, card" class="mb-4" />
 
           <!-- Empty -->
-          <v-alert
-            v-else-if="!filteredItems.length"
-            type="info"
-            variant="tonal"
-            class="mb-2"
-          >
-            No saved interpretations found.
-            After generating a CBC explanation, click
+          <v-alert v-else-if="!filteredItems.length" type="info" variant="tonal" class="mb-2">
+            No saved interpretations found. After generating a CBC explanation, click
             <strong>“Save to History”</strong> to store it here.
           </v-alert>
 
           <!-- Rows -->
-          <transition-group
-            v-else
-            name="history-list"
-            tag="div"
-          >
+          <transition-group v-else name="history-list" tag="div">
             <v-card
               v-for="row in filteredItems"
               :key="row.id"
@@ -414,10 +571,7 @@ onMounted(fetchHistory)
             >
               <div class="row-inner">
                 <transition name="fade">
-                  <div
-                    v-if="selectionMode"
-                    class="select-box-wrap"
-                  >
+                  <div v-if="selectionMode" class="select-box-wrap">
                     <v-checkbox-btn
                       :model-value="isSelected(row)"
                       :disabled="row.pinned"
@@ -445,11 +599,7 @@ onMounted(fetchHistory)
                         {{ providerLabel(row.provider) }}
                       </v-chip>
 
-                      <v-chip
-                        v-if="row.pinned"
-                        size="x-small"
-                        class="pinned-pill"
-                      >
+                      <v-chip v-if="row.pinned" size="x-small" class="pinned-pill">
                         <v-icon size="13" class="me-1">mdi-pin</v-icon>
                         Pinned
                       </v-chip>
@@ -463,19 +613,14 @@ onMounted(fetchHistory)
                       :loading="pinLoadingId === row.id"
                       @click.stop="togglePinned(row, $event)"
                     >
-                      <v-icon
-                        size="16"
-                        class="pin-icon"
-                        :class="{ active: row.pinned }"
-                      >
+                      <v-icon size="16" class="pin-icon" :class="{ active: row.pinned }">
                         {{ row.pinned ? 'mdi-pin' : 'mdi-pin-outline' }}
                       </v-icon>
                     </v-btn>
                   </div>
 
                   <div class="row-title">
-                    CBC Interpretation • Age {{ row.test_age ?? '—' }} •
-                    {{ sexLabel(row.test_sex) }}
+                    CBC Interpretation • Age {{ row.test_age ?? '—' }} • {{ sexLabel(row.test_sex) }}
                   </div>
 
                   <div class="row-meta">
@@ -508,14 +653,10 @@ onMounted(fetchHistory)
           </v-fab-transition>
         </div>
 
-        <!-- ============ DETAIL MODE ============ -->
+        <!-- ============ DETAIL MODE (shows full Result-like view) ============ -->
         <div v-else>
           <div class="d-flex align-center justify-space-between mb-3">
-            <v-btn
-              variant="text"
-              prepend-icon="mdi-arrow-left"
-              @click="closeDetail"
-            >
+            <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="closeDetail">
               Back
             </v-btn>
 
@@ -539,11 +680,7 @@ onMounted(fetchHistory)
                 :loading="pinLoadingId === selectedItem.id"
                 @click="togglePinned(selectedItem, $event)"
               >
-                <v-icon
-                  size="18"
-                  class="pin-icon"
-                  :class="{ active: selectedItem.pinned }"
-                >
+                <v-icon size="18" class="pin-icon" :class="{ active: selectedItem.pinned }">
                   {{ selectedItem.pinned ? 'mdi-pin' : 'mdi-pin-outline' }}
                 </v-icon>
               </v-btn>
@@ -552,40 +689,108 @@ onMounted(fetchHistory)
 
           <v-card class="detail-card">
             <v-card-text>
-              <div class="detail-header mb-3">
-                <div class="detail-title">CBC Interpretation Summary</div>
+              <!-- Personal & Lab Details (mirrors ResultPage) -->
+              <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
+                <v-row dense>
+                  <v-col cols="12" md="4">
+                    <div class="meta-label">Patient Name</div>
+                    <div class="meta-value">{{ patientName || 'Not set in profile' }}</div>
+                  </v-col>
 
-                <div class="detail-sub">
-                  <span>
-                    <v-icon size="16" class="me-1">mdi-account</v-icon>
-                    Age: <strong>{{ selectedItem.test_age ?? '—' }}</strong>
-                  </span>
-                  <span>
-                    <v-icon size="16" class="ms-3 me-1">mdi-gender-male-female</v-icon>
-                    Sex: <strong>{{ sexLabel(selectedItem.test_sex) }}</strong>
-                  </span>
+                  <v-col cols="6" md="2">
+                    <div class="meta-label">Age</div>
+                    <div class="meta-value">{{ selectedItem.test_age ?? '—' }}</div>
+                  </v-col>
+
+                  <v-col cols="6" md="2">
+                    <div class="meta-label">Sex</div>
+                    <div class="meta-value">{{ sexLabel(selectedItem.test_sex) }}</div>
+                  </v-col>
+
+                  <v-col cols="12" md="4">
+                    <div class="meta-label">Laboratory Name</div>
+                    <div class="meta-value">{{ selectedItem.test_lab_name || '—' }}</div>
+                  </v-col>
+
+                  <v-col cols="12" md="4">
+                    <div class="meta-label">Laboratory Location</div>
+                    <div class="meta-value">{{ labLocation || '—' }}</div>
+                  </v-col>
+
+                  <v-col cols="6" md="2">
+                    <div class="meta-label">Test Date</div>
+                    <div class="meta-value">{{ displayTestDate || '—' }}</div>
+                  </v-col>
+
+                  <v-col cols="6" md="2">
+                    <div class="meta-label">Country</div>
+                    <div class="meta-value">{{ selectedItem.test_lab_country || '—' }}</div>
+                  </v-col>
+
+                  <v-col cols="12" md="4">
+                    <div class="meta-label">Saved</div>
+                    <div class="meta-value">{{ formattedDate(selectedItem.created_at) }}</div>
+                  </v-col>
+                </v-row>
+              </v-sheet>
+
+              <!-- Status Overview -->
+              <v-sheet v-if="hasCBCSummary" class="cbc-summary-sheet mt-4" rounded="xl" variant="outlined">
+                <div class="cbc-summary-header d-flex align-center gap-2 mb-2">
+                  <v-icon size="18" class="me-2">mdi-clipboard-pulse-outline</v-icon>
+                  <h3>Status Overview</h3>
                 </div>
 
-                <div class="detail-sub">
-                  <v-icon size="14" class="me-1">mdi-calendar-clock</v-icon>
-                  Saved:
-                  <strong>{{ formattedDate(selectedItem.created_at) }}</strong>
+                <v-row dense>
+                  <v-col
+                    v-for="item in selectedSummaryItems"
+                    :key="item.key"
+                    cols="12" sm="6" md="4" lg="3" class="mb-1"
+                  >
+                    <div class="cbc-item">
+                      <div class="cbc-label">{{ item.label }}</div>
+                      <div class="cbc-value-line">
+                        <span class="cbc-value">{{ fmtVal(item) }}</span>
+                        <v-chip
+                          v-if="item.status && item.status !== '—'"
+                          :color="chipColor(item.status)"
+                          size="x-small"
+                          variant="elevated"
+                          class="status-chip text-uppercase font-weight-bold"
+                        >
+                          {{ item.status }}
+                        </v-chip>
+                      </div>
+                      <div class="cbc-ref">Ref: {{ formatRef(item) }}</div>
+                    </div>
+                  </v-col>
+                </v-row>
+              </v-sheet>
+
+              <!-- Interpretation -->
+              <div class="mt-6 ai-section">
+                <div class="ai-header d-flex align-center gap-2 mb-2">
+                  <v-icon color="#b70d37" class="me-2">mdi-robot-outline</v-icon>
+                  <span class="ai-title">AI-Assisted Explanation</span>
+                </div>
+
+                <v-alert type="warning" variant="tonal" density="comfortable" class="mb-4">
+                  This explanation is for educational support only and must not replace assessment by a
+                  licensed physician. If you feel unwell or your results are significantly abnormal, please
+                  consult your doctor.
+                </v-alert>
+
+                <div v-if="selectedHtml" class="detail-markdown" v-html="selectedHtml"></div>
+                <div v-else class="text-grey-darken-1 text-body-2">
+                  No interpretation found for this entry.
                 </div>
               </div>
-
-              <div
-                v-html="selectedHtml"
-                class="detail-markdown"
-              ></div>
             </v-card-text>
           </v-card>
         </div>
 
         <!-- Bulk delete confirmation dialog -->
-        <v-dialog
-          v-model="bulkDeleteDialog"
-          max-width="360"
-        >
+        <v-dialog v-model="bulkDeleteDialog" max-width="360">
           <v-card>
             <v-card-title class="text-subtitle-1 font-weight-bold">
               Delete selected reports?
@@ -597,19 +802,10 @@ onMounted(fetchHistory)
               This action cannot be undone.
             </v-card-text>
             <v-card-actions class="justify-end">
-              <v-btn
-                variant="text"
-                :disabled="bulkDeleteLoading"
-                @click="cancelBulkDelete"
-              >
+              <v-btn variant="text" :disabled="bulkDeleteLoading" @click="cancelBulkDelete">
                 Cancel
               </v-btn>
-              <v-btn
-                color="error"
-                variant="flat"
-                :loading="bulkDeleteLoading"
-                @click="confirmBulkDelete"
-              >
+              <v-btn color="error" variant="flat" :loading="bulkDeleteLoading" @click="confirmBulkDelete">
                 Yes, delete
               </v-btn>
             </v-card-actions>
@@ -617,12 +813,7 @@ onMounted(fetchHistory)
         </v-dialog>
 
         <!-- Snackbar feedback -->
-        <v-snackbar
-          v-model="snackbar"
-          :color="snackbarColor"
-          location="bottom"
-          timeout="2200"
-        >
+        <v-snackbar v-model="snackbar" :color="snackbarColor" location="bottom" timeout="2200">
           {{ snackbarMessage }}
         </v-snackbar>
       </v-container>
@@ -641,34 +832,24 @@ onMounted(fetchHistory)
   justify-content: space-between;
   gap: 8px;
 }
-
 .history-title {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-
 .history-title::before {
   content: '';
   display: block;
   height: 2px;
   width: 50px;
-  background-color: #9ec8da;
+  background-color: #1E88E5;
   border-radius: 999px;
   margin-top: 2px;
 }
-
 @media (max-width: 600px) {
-  .history-title::after {
-    width: 50px;
-  }
+  .history-title::after { width: 50px; }
 }
-
-.history-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+.history-actions { display: flex; align-items: center; gap: 6px; }
 
 /* Filter pills */
 .filter-pill {
@@ -681,260 +862,109 @@ onMounted(fetchHistory)
   color: #4b4f6a;
   box-shadow: 0 2px 4px rgba(15, 23, 42, 0.12);
 }
-.filter-pill-active {
-  background: #5b93d7;
-  color: #ffffff;
-}
-
+.filter-pill-active { background: #5b93d7; color: #ffffff; }
 .filters-wrapper {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 10px;
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px;
 }
 
 /* List rows */
 .history-row {
-  box-shadow: none;
-  border-radius: 0;
-  border-bottom: 1px solid rgba(148, 163, 253, 0.18);
-  padding: 10px 4px;
-  cursor: pointer;
-  transition:
-    background-color 0.16s ease,
-    transform 0.12s ease,
-    border-color 0.16s ease;
+  box-shadow: none; border-radius: 0; border-bottom: 1px solid rgba(148, 163, 253, 0.18);
+  padding: 9px 10px; cursor: pointer;
+  transition: background-color 0.16s ease, transform 0.12s ease, border-color 0.16s ease;
 }
-.history-row:last-of-type {
-  border-bottom: none;
-}
-.history-row:hover {
-  background-color: rgba(248, 250, 252, 0.98);
-  transform: translateY(-1px);
-}
-
+.history-row:last-of-type { border-bottom: none; }
+.history-row:hover { transform: translateY(-1px); }
 .history-row-selected {
-  background-color: rgba(183, 8, 26, 0.12);
-  border-left: 3px solid #b70d37;
-  transform: translateX(2px);
+  background-color: rgba(183, 8, 26, 0.12); border-left: 3px solid #b69da4; transform: translateX(2px);
   transition: all 0.25s ease;
 }
-
 @media (prefers-color-scheme: dark) {
-  .history-row-selected {
-    background-color: rgba(183, 8, 26, 0.22);
-    border-left-color: #f2cccc;
-  }
+  .history-row-selected { background-color: rgba(183, 8, 26, 0.22); border-left-color: #f2cccc; }
 }
-
-.row-inner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.select-box-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding-left: 2px;
-}
-
+.row-inner { display: flex; align-items: center; gap: 10px; }
+.select-box-wrap { display: flex; align-items: center; justify-content: center; padding-left: 2px; }
 .avatar-circle {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: #f2cccc;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #b9081a;
-  flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: 50%; background: #f2cccc; color: #b9081a;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
-
-.row-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.status-pill {
-  border-radius: 999px;
-  padding-inline: 10px;
-  font-weight: 600;
-}
-
+.row-content { flex: 1; min-width: 0; }
+.status-pill { border-radius: 999px; padding-inline: 10px; font-weight: 600; }
 .pinned-pill {
-  border-radius: 999px;
-  padding-inline: 8px;
-  font-size: 0.65rem;
-  background-color: #fff5f5;
-  color: #b70d37;
-  display: inline-flex;
-  align-items: center;
+  border-radius: 999px; padding-inline: 8px; font-size: 0.65rem; background-color: #fff5f5;
+  color: #b70d37; display: inline-flex; align-items: center;
 }
+.pin-btn { min-width: 0; padding: 0; }
+.pin-icon { color: #9ca3af; border-radius: 50%; padding: 12px; transition: all 0.2s ease; }
+.pin-icon.active { color: #b9081a !important; background-color: #f2cccc !important; }
+.pin-icon:hover { background-color: #f3f4f6; transform: scale(1.05); }
+.pin-icon.active:hover { background-color: #f7d9d9 !important; }
 
-.pin-btn {
-  min-width: 0;
-  padding: 0;
-}
-.pin-icon {
-  color: #9ca3af;
-  border-radius: 50%;
-  padding: 12px;
-  transition: all 0.2s ease;
-}
-.pin-icon.active {
-  color: #b9081a !important;
-  background-color: #f2cccc !important;
-}
-.pin-icon:hover {
-  background-color: #f3f4f6;
-  transform: scale(1.05);
-}
-.pin-icon.active:hover {
-  background-color: #f7d9d9 !important;
-}
-
-.row-title {
-  font-size: 0.88rem;
-  font-weight: 600;
-  margin-top: 2px;
-}
+.row-title { font-size: 0.88rem; font-weight: 600; margin-top: 2px; }
 .row-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 0.74rem;
-  color: #6b7280;
-  margin-top: 2px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  font-size: 0.74rem; color: #6b7280; margin-top: 2px;
 }
-.row-meta .dot {
-  margin: 0 3px;
-}
-.preview-text {
-  color: #9ca3af;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.row-meta .dot { margin: 0 3px; }
+.preview-text { color: #9ca3af; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.detail-card {
-  border-radius: 24px;
-  border: 2px solid #b70d37;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
-  padding: 2px;
-}
-.detail-card :deep(.v-card-text) {
-  padding: 18px 18px 20px;
-}
+/* Detail card */
+.detail-card { border-radius: 24px; border: 2px solid #0D47A1; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); padding: 2px; }
+.detail-card :deep(.v-card-text) { padding: 18px 18px 20px; }
 
-.detail-header .detail-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  margin-bottom: 4px;
+/* Meta section */
+.meta-sheet { padding: 10px 20px; border: 2px solid #0d47a1; }
+.meta-label {
+  font-size: 0.7rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.06em;
 }
-.detail-sub {
-  font-size: 0.78rem;
-  color: #6b7280;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+.meta-value { font-size: 0.9rem; font-weight: 600; margin-top: 2px; }
 
+/* CBC Summary */
+.cbc-summary-sheet { padding: 10px 14px; }
+.cbc-summary-header { font-size: 0.8rem; }
+.cbc-item { padding: 4px 0; }
+.cbc-label { font-size: 0.75rem; }
+.cbc-value-line { display: flex; align-items: center; gap: 6px; }
+.cbc-value { font-size: 0.9rem; font-weight: 600; }
+.cbc-ref { font-size: 0.68rem; }
+.status-chip { font-size: 0.6rem; }
+
+/* AI Section */
+.ai-section { margin-top: 18px; }
+.ai-header .ai-title { font-weight: 600; font-size: 0.98rem; }
 .detail-markdown {
-  margin-top: 10px;
-  padding: 10px 14px 8px;
-  border-radius: 18px;
-  font-size: 0.9rem;
-  line-height: 1.6;
+  margin-top: 10px; padding: 10px 14px 8px; border-radius: 18px;
+  font-size: 0.9rem; line-height: 1.6;
 }
-.detail-markdown h2,
-.detail-markdown h3 {
-  margin-top: 0.65rem;
-  margin-bottom: 0.2rem;
-  font-size: 0.96rem;
-  font-weight: 600;
+.detail-markdown h2, .detail-markdown h3 {
+  margin-top: 0.65rem; margin-bottom: 0.2rem; font-size: 0.96rem; font-weight: 600;
 }
-.detail-markdown ul,
-.detail-markdown ol {
-  padding-left: 1.4rem;
-  margin: 0.3rem 0 0.55rem;
-}
-.detail-markdown li {
-  margin: 0.14rem 0;
-}
-.detail-markdown strong {
-  font-weight: 600;
-}
+.detail-markdown ul, .detail-markdown ol { padding-left: 1.4rem; margin: 0.3rem 0 0.55rem; }
+.detail-markdown li { margin: 0.14rem 0; }
+.detail-markdown strong { font-weight: 600; }
 
-.history-list-move {
-  transition: transform 0.2s ease, opacity 0.2s ease;
-}
-.history-list-enter-active,
-.history-list-leave-active {
-  transition: all 0.2s ease;
-}
-.history-list-enter-from,
-.history-list-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+/* transitions + misc */
+.history-list-move { transition: transform 0.2s ease, opacity 0.2s ease; }
+.history-list-enter-active, .history-list-leave-active { transition: all 0.2s ease; }
+.history-list-enter-from, .history-list-leave-to { opacity: 0; transform: translateY(4px); }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .delete-fab {
-  position: fixed !important;
-  right: 18px !important;
-  bottom: 110px !important;
-  width: 52px;
-  height: 52px;
-  border-radius: 999px;
-  min-width: 0;
-  padding: 0;
-  background-color: #b70d37 !important;
-  color: #ffffff !important;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.26);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1400;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  position: fixed !important; right: 18px !important; bottom: 110px !important;
+  width: 52px; height: 52px; border-radius: 999px; min-width: 0; padding: 0;
+  background-color: #b70d37 !important; color: #ffffff !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.26); display: flex; align-items: center; justify-content: center;
+  z-index: 1400; transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.delete-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
-}
+.delete-fab:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); }
 
 @media (max-width: 600px) {
-  .history-header {
-    flex-direction: row;
-    align-items: center;
-  }
-  .row-title {
-    font-size: 0.84rem;
-  }
-  .row-meta {
-    font-size: 0.7rem;
-  }
-  .delete-fab {
-    bottom: 72px;
-    right: 16px;
-  }
+  .history-header { flex-direction: row; align-items: center; }
+  .row-title { font-size: 0.84rem; }
+  .row-meta { font-size: 0.7rem; }
+  .delete-fab { bottom: 72px; right: 16px; }
 }
 
-.cancel-select-btn {
-  color: #b70d37 !important;
-  font-weight: 600;
-}
+.cancel-select-btn { color: #b70d37 !important; font-weight: 600; }
 </style>

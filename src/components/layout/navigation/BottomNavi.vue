@@ -8,7 +8,7 @@ const route = useRoute()
 
 const HOME     = { title: 'Home',    icon: 'mdi-home',    path: '/dashboard' }
 const ACCOUNT  = { title: 'Account', icon: 'mdi-account', path: '/account/settings' }
-const FAB      = { title: 'Interpreter', icon: 'mdi-robot', path: '/interpreter' }
+const FAB      = { title: 'Interpreter', icon: 'mdi mdi-robot', path: '/interpreter' }
 
 const toPath = t => `/${t.replace(/\s+/g, '-').toLowerCase()}`
 

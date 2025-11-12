@@ -1,7 +1,7 @@
 <!-- src/views/system/Interpret.vue -->
 <script setup>
 import AppLayout from '@/components/layout/AppLayout.vue'
-import SideNavi from '@/components/layout/navigation/SideNavi.vue'
+import SideNavi from '@/components/layout/AppLayout.vue'
 import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
 import { ref, computed, watch } from 'vue'
 import { useDisplay } from 'vuetify'
@@ -44,20 +44,32 @@ const aiResult = ref('')
 const htmlResult = computed(() => renderMarkdownSafe(aiResult.value))
 const lastPrompt = ref('')
 const lastSavedIds = ref(null)
-
-/* Show/hide result page */
 const showResult = ref(false)
 
-/* Result meta (patient info + timestamp shown on ResultPage) */
+/* Wizard */
+const totalSteps = 3
+const currentStep = ref(1)
+
+/* Result meta for ResultPage */
 const resultMeta = ref({
   age: '',
   sex: '',
   takenAt: '',
+  labName: '',
+  labCity: '',
+  labCountry: '',
 })
 
+/* Base form */
 const form = ref({
   age: '',
   sex: 'F',
+
+  labName: '',
+  labCity: '',
+  labCountry: 'Philippines',
+  testDate: '',
+
   wbc: '',
   rbc: '',
   hb: '',
@@ -73,8 +85,11 @@ const form = ref({
   basophils: '',
 })
 
-/* ------------ VALIDATION ------------ */
+/* ------------ Generic rules ------------ */
+const requiredText = (v) => !!(v && String(v).trim()) || 'Required'
+
 const numberRule = (v) => v === '' || v == null || !isNaN(Number(v)) || 'Numbers only'
+
 const requiredNumberRule = (v) => (v !== '' && v != null && !isNaN(Number(v))) || 'Required number'
 
 const hardLimitRule = (min, max, label) => (v) => {
@@ -99,7 +114,97 @@ const hardLimits = {
   plt: { min: 0, max: 2000 },
 }
 
-/* ------------ Reference Ranges ------------ */
+/* ------------ Rule arrays ------------ */
+const wbcRules = [requiredNumberRule, hardLimitRule(hardLimits.wbc.min, hardLimits.wbc.max, 'WBC')]
+const rbcRules = [requiredNumberRule, hardLimitRule(hardLimits.rbc.min, hardLimits.rbc.max, 'RBC')]
+const hbRules = [
+  requiredNumberRule,
+  hardLimitRule(hardLimits.hb.min, hardLimits.hb.max, 'Hemoglobin'),
+]
+const hctRules = [requiredNumberRule, hctHardRule]
+const mcvRules = [requiredNumberRule, hardLimitRule(hardLimits.mcv.min, hardLimits.mcv.max, 'MCV')]
+const mchRules = [requiredNumberRule, hardLimitRule(hardLimits.mch.min, hardLimits.mch.max, 'MCH')]
+const mchcRules = [
+  requiredNumberRule,
+  hardLimitRule(hardLimits.mchc.min, hardLimits.mchc.max, 'MCHC'),
+]
+const pltRules = [
+  requiredNumberRule,
+  hardLimitRule(hardLimits.plt.min, hardLimits.plt.max, 'Platelets'),
+]
+
+const neutRules = [numberRule, ratioHardRule]
+const lymphRules = [numberRule, ratioHardRule]
+const monoRules = [numberRule, ratioHardRule]
+const eosRules = [numberRule, ratioHardRule]
+const basoRules = [numberRule, ratioHardRule]
+
+/* helper to run same rules programmatically */
+const runRules = (value, rules = []) => {
+  for (const r of rules) {
+    if (!r) continue
+    const res = r(value)
+    if (res !== true) return false
+  }
+  return true
+}
+
+/* ------------ Step 1 gate (includes lab + city + date) ------------ */
+const canProceedFromStep1 = computed(() => {
+  const ageNum = Number(form.value.age)
+  const hasAge = form.value.age !== '' && !isNaN(ageNum) && ageNum >= 0 && ageNum <= 120
+  const hasSex = !!form.value.sex
+  const hasLabName = !!form.value.labName?.trim()
+  const hasCity = !!form.value.labCity?.trim()
+  const hasTestDate = !!form.value.testDate
+
+  return hasAge && hasSex && hasLabName && hasCity && hasTestDate
+})
+
+const goFromStep1 = () => {
+  errorMsg.value = ''
+  if (!canProceedFromStep1.value) {
+    errorMsg.value =
+      'Please complete age, sex, laboratory name, city, and test date before proceeding.'
+    return
+  }
+  currentStep.value = 2
+}
+
+/* ------------ Step 2 gate (CBC; block red errors) ------------ */
+const goFromStep2 = () => {
+  errorMsg.value = ''
+
+  const requiredCBC = [
+    ['wbc', wbcRules],
+    ['rbc', rbcRules],
+    ['hb', hbRules],
+    ['hct', hctRules],
+    ['mcv', mcvRules],
+    ['mch', mchRules],
+    ['mchc', mchcRules],
+    ['plt', pltRules],
+  ]
+
+  const invalid = requiredCBC.filter(
+    ([key, rules]) =>
+      form.value[key] === '' || form.value[key] == null || !runRules(form.value[key], rules),
+  )
+
+  if (invalid.length) {
+    errorMsg.value =
+      'Please complete all CBC core fields with realistic values. Fields in red must be corrected before proceeding.'
+    return
+  }
+
+  currentStep.value = 3
+}
+
+const prevStep = () => {
+  if (currentStep.value > 1) currentStep.value -= 1
+}
+
+/* ------------ Reference ranges & hints ------------ */
 const ranges = {
   wbc: { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
   rbcM: { low: 4.5, high: 5.2, unit: '×10¹²/L', label: 'RBC' },
@@ -119,7 +224,6 @@ const ranges = {
   baso: { low: 0.0, high: 0.01, unit: '', label: 'Basophils' },
 }
 
-/* ------------ Computed hints ------------ */
 const sex = computed(() => (form.value.sex === 'M' ? 'M' : 'F'))
 const rbcHint = computed(() =>
   sex.value === 'M' ? 'Normal: 4.5–5.2 ×10¹²/L' : 'Normal: 3.4–5.6 ×10¹²/L',
@@ -129,7 +233,7 @@ const hctHint = computed(() =>
   sex.value === 'M' ? 'Normal: 0.40–0.52 L/L' : 'Normal: 0.36–0.48 L/L',
 )
 
-/* ------------ Helpers ------------ */
+/* ------------ Normalizers & watchers ------------ */
 const parse = (v) => (v === '' || v == null ? NaN : Number(v))
 const getStatus = (val, low, high) => {
   if (!isFinite(val)) return '—'
@@ -160,7 +264,7 @@ const normalizeRBC = (v) => {
   return n
 }
 
-/* Watchers: auto-normalize common input patterns */
+/* Auto-normalize common patterns */
 watch(
   () => [
     form.value.neutrophils,
@@ -172,8 +276,8 @@ watch(
     form.value.rbc,
   ],
   (vals) => {
-    const keys = ['neutrophils', 'lymphocytes', 'monocytes', 'eosinophils', 'basophils']
-    keys.forEach((k, i) => {
+    const diffKeys = ['neutrophils', 'lymphocytes', 'monocytes', 'eosinophils', 'basophils']
+    diffKeys.forEach((k, i) => {
       const oldVal = vals[i]
       const fixed = normalizeRatio(oldVal)
       if (fixed !== oldVal && fixed !== '') form.value[k] = fixed
@@ -189,7 +293,7 @@ watch(
   },
 )
 
-/* ------------ Summary table ------------ */
+/* ------------ Summary table for ResultPage ------------ */
 const summaryItems = computed(() => {
   const s = sex.value
   return [
@@ -286,7 +390,6 @@ const summaryItems = computed(() => {
   ]
 })
 
-/* ------------ Display helpers ------------ */
 const chipColor = (status) =>
   status === 'Low'
     ? 'error'
@@ -327,6 +430,9 @@ function buildPrompt() {
   const core = [
     `Age: ${form.value.age}`,
     `Sex: ${s}`,
+    `Laboratory: ${form.value.labName || 'N/A'}`,
+    `Location: ${[form.value.labCity, form.value.labCountry].filter(Boolean).join(', ') || 'N/A'}`,
+    `Test date: ${form.value.testDate || 'N/A'}`,
     `WBC: ${form.value.wbc} ×10⁹/L (ref 5.0–10.0)`,
     `RBC: ${form.value.rbc} ×10¹²/L (ref ${s === 'M' ? '4.5–5.2' : '3.4–5.6'})`,
     `Hemoglobin: ${form.value.hb} g/L (ref ${s === 'M' ? '135–175' : '125–155'})`,
@@ -363,7 +469,7 @@ ${abnormals}
 `.trim()
 }
 
-/* ------------ Supabase saver (UPDATED) ------------ */
+/* ------------ Supabase saver helpers ------------ */
 const clamp01Send = (x) => clamp01(x)
 
 function normRatioSend(v) {
@@ -380,11 +486,10 @@ function normHctSend(v) {
   return n > 1.5 ? Number((n / 100).toFixed(2)) : n
 }
 
-// Save inputs + interpretation into cbc.tests + cbc.interpretations
+/* Save inputs + interpretation into cbc.tests + cbc.interpretations */
 async function saveInterpretationRPC(prompt, resultMarkdown) {
   const { data: authData } = await supabase.auth.getUser()
 
-  // If not logged in, allow viewing result but don't persist
   if (!authData?.user) {
     lastSavedIds.value = null
     return
@@ -393,6 +498,12 @@ async function saveInterpretationRPC(prompt, resultMarkdown) {
   const payload = {
     age: Number(form.value.age),
     sex: form.value.sex,
+
+    lab_name: form.value.labName?.trim() || null,
+    lab_city: form.value.labCity?.trim() || null,
+    lab_country: form.value.labCountry?.trim() || null,
+    test_date: form.value.testDate || null,
+
     wbc: Number(form.value.wbc),
     rbc: Number(form.value.rbc),
     hb: Number(form.value.hb),
@@ -440,7 +551,7 @@ async function saveInterpretationRPC(prompt, resultMarkdown) {
   }
 }
 
-// Save bookmark into cbc.saved_history
+/* Save bookmark into cbc.saved_history */
 async function handleSaveHistory() {
   errorMsg.value = ''
   successMsg.value = ''
@@ -489,6 +600,39 @@ async function callOpenAI(prompt) {
   return await getAI({ provider: 'openai', model: OPENAI_MODEL, prompt })
 }
 
+/* ------------ Central validation before submit ------------ */
+const validateAllBeforeSubmit = () => {
+  // Step 1
+  if (!canProceedFromStep1.value) {
+    errorMsg.value = 'Please complete your personal and laboratory details before analyzing.'
+    currentStep.value = 1
+    return false
+  }
+
+  // Step 2: CBC core
+  const requiredCBC = [
+    ['wbc', wbcRules],
+    ['rbc', rbcRules],
+    ['hb', hbRules],
+    ['hct', hctRules],
+    ['mcv', mcvRules],
+    ['mch', mchRules],
+    ['mchc', mchcRules],
+    ['plt', pltRules],
+  ]
+
+  for (const [key, rules] of requiredCBC) {
+    if (form.value[key] === '' || form.value[key] == null || !runRules(form.value[key], rules)) {
+      errorMsg.value =
+        'Please review your CBC values. Fields highlighted in red or out of realistic range must be corrected.'
+      currentStep.value = 2
+      return false
+    }
+  }
+
+  return true
+}
+
 /* ------------ Submit ------------ */
 async function onSubmit() {
   errorMsg.value = ''
@@ -497,20 +641,7 @@ async function onSubmit() {
   lastSavedIds.value = null
   showResult.value = false
 
-  if (formRef.value?.validate) {
-    const { valid } = await formRef.value.validate()
-    if (!valid) {
-      errorMsg.value = 'Please fix the highlighted fields.'
-      return
-    }
-  }
-
-  const required = ['age', 'wbc', 'rbc', 'hb', 'hct', 'mcv', 'mch', 'mchc', 'plt']
-  const missing = required.filter(
-    (k) => form.value[k] === '' || form.value[k] === null || form.value[k] === undefined,
-  )
-  if (missing.length) {
-    errorMsg.value = `Missing required fields: ${missing.join(', ')}`
+  if (!validateAllBeforeSubmit()) {
     return
   }
 
@@ -523,17 +654,16 @@ async function onSubmit() {
 
     aiResult.value = stripThink(raw)
 
-    // Capture meta at interpretation time (for ResultPage + history)
     resultMeta.value = {
       age: form.value.age,
       sex: sex.value,
-      takenAt: new Date().toISOString(),
+      takenAt: form.value.testDate || new Date().toISOString(),
+      labName: form.value.labName || '',
+      labCity: form.value.labCity || '',
+      labCountry: form.value.labCountry || '',
     }
 
-    // Save test + interpretation (if logged in) & capture IDs
     await saveInterpretationRPC(prompt, aiResult.value)
-
-    // Show result view
     showResult.value = true
   } catch (e) {
     console.error(e)
@@ -542,31 +672,6 @@ async function onSubmit() {
     loading.value = false
   }
 }
-
-/* ------------ Rule arrays ------------ */
-const wbcRules = [requiredNumberRule, hardLimitRule(hardLimits.wbc.min, hardLimits.wbc.max, 'WBC')]
-const rbcRules = [requiredNumberRule, hardLimitRule(hardLimits.rbc.min, hardLimits.rbc.max, 'RBC')]
-const hbRules = [
-  requiredNumberRule,
-  hardLimitRule(hardLimits.hb.min, hardLimits.hb.max, 'Hemoglobin'),
-]
-const hctRules = [requiredNumberRule, hctHardRule]
-const mcvRules = [requiredNumberRule, hardLimitRule(hardLimits.mcv.min, hardLimits.mcv.max, 'MCV')]
-const mchRules = [requiredNumberRule, hardLimitRule(hardLimits.mch.min, hardLimits.mch.max, 'MCH')]
-const mchcRules = [
-  requiredNumberRule,
-  hardLimitRule(hardLimits.mchc.min, hardLimits.mchc.max, 'MCHC'),
-]
-const pltRules = [
-  requiredNumberRule,
-  hardLimitRule(hardLimits.plt.min, hardLimits.plt.max, 'Platelets'),
-]
-
-const neutRules = [numberRule, ratioHardRule]
-const lymphRules = [numberRule, ratioHardRule]
-const monoRules = [numberRule, ratioHardRule]
-const eosRules = [numberRule, ratioHardRule]
-const basoRules = [numberRule, ratioHardRule]
 </script>
 
 <template>
@@ -600,8 +705,8 @@ const basoRules = [numberRule, ratioHardRule]
           <template #subtitle>
             <p class="ms-4 text-wrap">
               <span v-if="!showResult">
-                Add your details and CBC results, confirm the overview, then analyze with your
-                chosen AI. 🩺
+                Guided steps: enter your details, add CBC values, choose your AI, then analyze your
+                report. 🩺
               </span>
               <span v-else>
                 Below is your personalized AI interpretation — summarizing possible findings and
@@ -611,303 +716,468 @@ const basoRules = [numberRule, ratioHardRule]
           </template>
         </v-card>
 
-        <!-- FORM VIEW -->
+        <!-- FORM WIZARD VIEW -->
         <v-card v-if="!showResult" class="form-card">
           <v-card-text>
-            <v-form ref="formRef" @submit.prevent="onSubmit">
-              <v-alert v-if="errorMsg" type="error" class="mb-4" variant="tonal">
-                {{ errorMsg }}
-              </v-alert>
-              <v-alert v-if="successMsg" type="success" class="mb-4" variant="tonal">
-                {{ successMsg }}
-              </v-alert>
-
-              <!-- Personal Info -->
-              <div class="mt-4 mb-5 text-subtitle-2 d-flex align-center gap-2">
-                <v-icon class="me-2" size="20">mdi-account</v-icon>
-                <span>Personal Info</span>
+            <!-- Wizard title + stepper -->
+            <div class="wizard-header mt-3">
+              <div class="wizard-title mb-4">
+                <v-icon size="18" class="me-2" color="#B71C1C">mdi-water-opacity</v-icon>
+                Blood Test Analysis
               </div>
-              <v-row class="align-center" dense>
-                <!-- Age -->
-                <v-col cols="12" md="4">
-                  <v-text-field
-                    label="Age"
-                    v-model="form.age"
-                    :rules="[requiredNumberRule]"
-                    type="number"
-                    step="1"
-                    min="0"
-                    max="120"
-                    suffix="yr"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-cake-variant"
-                  />
-                </v-col>
+            </div>
 
-                <!-- Sex -->
-                <v-col cols="12" md="8" class="d-flex align-center">
-                  <v-radio-group
-                    v-model="form.sex"
-                    inline
-                    class="mt-0 d-flex align-center flex-wrap"
-                  >
-                    <v-label class="font-weight-medium d-flex align-center me-3">
-                      <v-icon color="#b70d37" size="18" class="me-1">mdi-gender-male-female</v-icon>
-                      Sex
-                    </v-label>
-
-                    <v-radio label="Female" value="F" />
-                    <v-radio label="Male" value="M" />
-                  </v-radio-group>
-                </v-col>
-              </v-row>
-
-              <v-divider class="my-4" />
-
-              <!-- CBC Core -->
-              <div class="mt-4 mb-2 text-subtitle-2 d-flex align-center gap-2">
-                <v-icon color="#B71C1C" size="20">mdi-water</v-icon>
-                <span>CBC Core</span>
+            <!-- UPDATED WIZARD STEPS -->
+            <div class="wizard-steps">
+              <!-- grey base line + red progress -->
+              <div class="wizard-bar">
+                <div
+                  class="wizard-bar-fill"
+                  :style="{ width: ((currentStep - 1) / (totalSteps - 1)) * 100 + '%' }"
+                />
               </div>
 
-              <v-row>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="WBC"
-                    v-model="form.wbc"
-                    :rules="wbcRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    suffix="×10⁹/L"
-                    hint="Normal: 5.0–10.0"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="RBC"
-                    v-model="form.rbc"
-                    :rules="rbcRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    suffix="×10¹²/L"
-                    :hint="rbcHint"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Hemoglobin"
-                    v-model="form.hb"
-                    :rules="hbRules"
-                    type="number"
-                    step="1"
-                    inputmode="decimal"
-                    suffix="g/L"
-                    :hint="hbHint"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Hematocrit"
-                    v-model="form.hct"
-                    :rules="hctRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    suffix="L/L"
-                    :hint="hctHint"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Platelets"
-                    v-model="form.plt"
-                    :rules="pltRules"
-                    type="number"
-                    inputmode="decimal"
-                    step="1"
-                    suffix="×10⁹/L"
-                    hint="Normal: 150–400"
-                    persistent-hint
-                  />
-                </v-col>
-              </v-row>
-
-              <!-- Red Cell Indices -->
-              <div class="mt-4 mb-2 text-subtitle-2 d-flex align-center gap-2">
-                <v-icon color="#b70d37" size="20">mdi-flask-outline</v-icon>
-                <span>Red Cell Indices</span>
-              </div>
-
-              <v-row>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="MCV"
-                    v-model="form.mcv"
-                    :rules="mcvRules"
-                    type="number"
-                    step="0.1"
-                    inputmode="decimal"
-                    suffix="fL"
-                    hint="Normal: 82–92"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="MCH"
-                    v-model="form.mch"
-                    :rules="mchRules"
-                    type="number"
-                    step="0.1"
-                    inputmode="decimal"
-                    suffix="pg"
-                    hint="Normal: 27–32"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="MCHC"
-                    v-model="form.mchc"
-                    :rules="mchcRules"
-                    type="number"
-                    step="1"
-                    inputmode="decimal"
-                    suffix="g/L"
-                    hint="Normal: 320–380"
-                    persistent-hint
-                  />
-                </v-col>
-              </v-row>
-
-              <!-- Differential -->
-              <div class="mt-4 mb-2 text-subtitle-2 d-flex align-center gap-2">
-                <v-icon color="#b70d37" size="20">mdi-clipboard-pulse-outline</v-icon>
-                <span>Differential (enter ratios 0–1)</span>
-              </div>
-
-              <v-row>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Neutrophils"
-                    v-model="form.neutrophils"
-                    :rules="neutRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    placeholder="e.g., 0.62"
-                    hint="Normal: 0.50–0.70"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Lymphocytes"
-                    v-model="form.lymphocytes"
-                    :rules="lymphRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    placeholder="e.g., 0.25"
-                    hint="Normal: 0.20–0.40"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Monocytes"
-                    v-model="form.monocytes"
-                    :rules="monoRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    placeholder="e.g., 0.04"
-                    hint="Normal: 0.02–0.06"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Eosinophils"
-                    v-model="form.eosinophils"
-                    :rules="eosRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    placeholder="e.g., 0.02"
-                    hint="Normal: 0.02–0.05"
-                    persistent-hint
-                  />
-                </v-col>
-                <v-col :cols="mobile ? 12 : 3">
-                  <v-text-field
-                    label="Basophils"
-                    v-model="form.basophils"
-                    :rules="basoRules"
-                    type="number"
-                    step="0.01"
-                    inputmode="decimal"
-                    placeholder="e.g., 0.01"
-                    hint="Normal: 0.00–0.01"
-                    persistent-hint
-                  />
-                </v-col>
-              </v-row>
-
-              <!-- Status Overview -->
-              <v-divider class="my-4" />
-              <v-alert type="info" variant="tonal" rounded="lg" class="mb-4">
-                <div class="mb-2 text-subtitle-2">Status Overview</div>
-                <div class="d-flex flex-wrap ga-2">
-                  <v-chip
-                    v-for="item in summaryItems"
-                    :key="item.key"
-                    :color="chipColor(item.status)"
-                    :variant="item.status === '—' ? 'outlined' : 'flat'"
-                    density="comfortable"
-                    class="mb-1"
-                  >
-                    {{ item.label }}:
-                    <strong class="ml-1">{{ fmtVal(item) }}</strong>
-                    <span class="ml-2">• {{ item.status }}</span>
-                  </v-chip>
+              <!-- dots -->
+              <div class="wizard-dots">
+                <div
+                  v-for="step in totalSteps"
+                  :key="step"
+                  class="wizard-dot"
+                  :class="{
+                    'is-active': step === currentStep,
+                    'is-complete': step < currentStep,
+                  }"
+                >
+                  <span v-if="step < currentStep">✓</span>
+                  <span v-else>{{ step }}</span>
                 </div>
-              </v-alert>
+              </div>
+            </div>
 
-              <!-- Provider + Analyze -->
-              <v-row class="mb-2" align="center" no-gutters>
-                <v-col :cols="mobile ? 12 : 6">
-                  <v-select
-                    v-model="provider"
-                    :items="providerItems"
-                    label="AI Provider"
-                    variant="outlined"
-                    density="comfortable"
-                    rounded
-                    hide-details
-                    :menu-props="{ maxHeight: 240 }"
-                  />
-                </v-col>
-              </v-row>
+            <v-form ref="formRef" @submit.prevent="onSubmit">
+              <!-- STEP 1: Personal & Lab Info -->
+              <div v-if="currentStep === 1">
+                <div class="step-title">Your Personal Information</div>
+                <p class="step-subtitle">
+                  Please enter your details so we can personalize your CBC interpretation report.
+                </p>
 
-              <v-btn
-                type="submit"
-                color="primary"
-                size="large"
-                :loading="loading"
-                :disabled="loading"
-                class="mb-2"
-              >
-                Get Interpretation (AI)
-              </v-btn>
-              <v-progress-linear v-if="loading || saving" indeterminate class="mb-2" />
+                <v-row class="align-center" dense>
+                  <!-- Age -->
+                  <v-col cols="12" md="4">
+                    <v-text-field
+                      label="Age"
+                      v-model="form.age"
+                      :rules="[requiredNumberRule]"
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="120"
+                      suffix="yr"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-cake-variant"
+                    />
+                  </v-col>
+
+                  <!-- Sex -->
+                  <v-col cols="12" md="8" class="d-flex align-center">
+                    <v-radio-group
+                      v-model="form.sex"
+                      inline
+                      class="mb-4 d-flex align-center flex-wrap"
+                    >
+                      <v-label class="font-weight-medium d-flex align-center me-3">
+                        <v-icon size="18" class="me-" color="#0D47A1"
+                          >mdi-gender-male-female</v-icon
+                        >
+                        Sex
+                      </v-label>
+                      <v-radio label="Female" value="F" />
+                      <v-radio label="Male" value="M" />
+                    </v-radio-group>
+                  </v-col>
+
+                  <!-- Laboratory Name -->
+                  <v-col cols="12">
+                    <v-text-field
+                      label="Laboratory Name"
+                      v-model="form.labName"
+                      :rules="[requiredText]"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-hospital-building"
+                      hint="e.g., City Diagnostics Laboratory"
+                      persistent-hint
+                    />
+                  </v-col>
+
+                  <!-- City -->
+                  <v-col cols="12" md="4">
+                    <v-text-field
+                      label="City"
+                      v-model="form.labCity"
+                      :rules="[requiredText]"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-city"
+                    />
+                  </v-col>
+
+                  <!-- Country (readonly Philippines) -->
+                  <v-col cols="12" md="4">
+                    <v-text-field
+                      label="Country"
+                      v-model="form.labCountry"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-earth"
+                      readonly
+                    />
+                  </v-col>
+
+                  <!-- Test Date -->
+                  <v-col cols="12" md="4">
+                    <v-text-field
+                      label="Test Date"
+                      v-model="form.testDate"
+                      :rules="[requiredText]"
+                      type="date"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-calendar"
+                    />
+                  </v-col>
+                </v-row>
+
+                <div class="step-actions mt-6 d-flex justify-end">
+                  <v-btn
+                    color="#0D47A1"
+                    class="wizard-next-btn"
+                    :disabled="!canProceedFromStep1"
+                    @click="goFromStep1"
+                  >
+                    Next
+                    <v-icon end>mdi-arrow-right</v-icon>
+                  </v-btn>
+                </div>
+              </div>
+
+              <!-- STEP 2: CBC Values -->
+              <div v-else-if="currentStep === 2">
+                <div class="step-title">Enter Your CBC Results</div>
+                <p class="step-subtitle">
+                  Fill in your CBC values. These will be used to generate your AI-assisted
+                  interpretation.
+                </p>
+
+                <!-- CBC Core -->
+                <div class="mt-4 mb-2 text-subtitle d-flex align-center gap-2">
+                  <v-icon size="20" color="#B71C1C">mdi-water</v-icon>
+                  <span>CBC Core</span>
+                </div>
+
+                <v-row>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="WBC"
+                      v-model="form.wbc"
+                      :rules="wbcRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      suffix="×10⁹/L"
+                      hint="Normal: 5.0–10.0"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="RBC"
+                      v-model="form.rbc"
+                      :rules="rbcRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      suffix="×10¹²/L"
+                      :hint="rbcHint"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Hemoglobin"
+                      v-model="form.hb"
+                      :rules="hbRules"
+                      type="number"
+                      step="1"
+                      inputmode="decimal"
+                      suffix="g/L"
+                      :hint="hbHint"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Hematocrit"
+                      v-model="form.hct"
+                      :rules="hctRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      suffix="L/L"
+                      :hint="hctHint"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Platelets"
+                      v-model="form.plt"
+                      :rules="pltRules"
+                      type="number"
+                      inputmode="decimal"
+                      step="1"
+                      suffix="×10⁹/L"
+                      hint="Normal: 150–400"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                </v-row>
+
+                <!-- Red Cell Indices -->
+                <div class="mt-4 mb-2 text-subtitle d-flex align-center gap-2">
+                  <v-icon size="20" color="#B71C1C">mdi-flask-outline</v-icon>
+                  <span>Red Cell Indices</span>
+                </div>
+
+                <v-row>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="MCV"
+                      v-model="form.mcv"
+                      :rules="mcvRules"
+                      type="number"
+                      step="0.1"
+                      inputmode="decimal"
+                      suffix="fL"
+                      hint="Normal: 82–92"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="MCH"
+                      v-model="form.mch"
+                      :rules="mchRules"
+                      type="number"
+                      step="0.1"
+                      inputmode="decimal"
+                      suffix="pg"
+                      hint="Normal: 27–32"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="MCHC"
+                      v-model="form.mchc"
+                      :rules="mchcRules"
+                      type="number"
+                      step="1"
+                      inputmode="decimal"
+                      suffix="g/L"
+                      hint="Normal: 320–380"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                </v-row>
+
+                <!-- Differential -->
+                <div class="mt-4 mb-2 text-subtitle d-flex align-center gap-2">
+                  <v-icon size="20" color="#B71C1C">mdi-clipboard-pulse-outline</v-icon>
+                  <span>Differential (enter ratios 0–1)</span>
+                </div>
+
+                <v-row>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Neutrophils"
+                      v-model="form.neutrophils"
+                      :rules="neutRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      placeholder="e.g., 0.62"
+                      hint="Normal: 0.50–0.70"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Lymphocytes"
+                      v-model="form.lymphocytes"
+                      :rules="lymphRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      placeholder="e.g., 0.25"
+                      hint="Normal: 0.20–0.40"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Monocytes"
+                      v-model="form.monocytes"
+                      :rules="monoRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      placeholder="e.g., 0.04"
+                      hint="Normal: 0.02–0.06"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Eosinophils"
+                      v-model="form.eosinophils"
+                      :rules="eosRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      placeholder="e.g., 0.02"
+                      hint="Normal: 0.02–0.05"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                  <v-col :cols="mobile ? 12 : 3">
+                    <v-text-field
+                      label="Basophils"
+                      v-model="form.basophils"
+                      :rules="basoRules"
+                      type="number"
+                      step="0.01"
+                      inputmode="decimal"
+                      placeholder="e.g., 0.01"
+                      hint="Normal: 0.00–0.01"
+                      persistent-hint
+                      variant="outlined"
+                      density="comfortable"
+                      class="cbc-input"
+                    />
+                  </v-col>
+                </v-row>
+
+                <v-alert
+                  v-if="currentStep === 2 && errorMsg"
+                  type="error"
+                  variant="tonal"
+                  class="mt-2 mb-0"
+                >
+                  {{ errorMsg }}
+                </v-alert>
+
+                <div class="step-actions mt-6 d-flex justify-space-between">
+                  <v-btn variant="outlined" class="wizard-prev-btn" @click="prevStep">
+                    <v-icon start>mdi-arrow-left</v-icon>
+                    Previous
+                  </v-btn>
+                  <v-btn color="#0D47A1" class="wizard-next-btn" @click="goFromStep2">
+                    Next
+                    <v-icon end>mdi-arrow-right</v-icon>
+                  </v-btn>
+                </div>
+              </div>
+
+              <!-- STEP 3: AI Provider Preference + Submit -->
+              <div v-else-if="currentStep === 3">
+                <div class="step-title">Choose Your AI Interpreter</div>
+                <p class="step-subtitle">
+                  Select which AI model will interpret your CBC report. Both use the same inputs you
+                  provided.
+                </p>
+
+                <v-row class="mb-2" align="center">
+                  <v-col cols="12">
+                    <v-select
+                      v-model="provider"
+                      :items="providerItems"
+                      label="AI Provider"
+                      variant="outlined"
+                      density="comfortable"
+                      rounded
+                      hide-details
+                      :menu-props="{ maxHeight: 240 }"
+                      prepend-inner-icon="mdi-robot-outline"
+                    />
+                  </v-col>
+                </v-row>
+
+                <v-alert type="info" variant="tonal" class="mt-4">
+                  <strong>Terms &amp; Privacy:</strong>
+                  By clicking
+                  <em>Analyze Blood Test</em>, you agree that this AI-generated explanation is for
+                  educational support and does not replace consultation with a licensed physician.
+                </v-alert>
+
+                <div class="step-actions mt-6 d-flex justify-space-between align-center ga-2">
+                  <v-btn variant="outlined" class="wizard-prev-btn" @click="prevStep">
+                    <v-icon start>mdi-arrow-left</v-icon>
+                    Previous
+                  </v-btn>
+
+                  <v-btn
+                    type="submit"
+                    color="success"
+                    class="wizard-analyze-btn"
+                    :loading="loading"
+                    :disabled="loading"
+                    prepend-icon="mdi-flash"
+                  >
+                    Analyze Blood Test
+                  </v-btn>
+                </div>
+
+                <v-progress-linear v-if="loading || saving" indeterminate class="mt-2" />
+              </div>
             </v-form>
           </v-card-text>
         </v-card>
@@ -927,8 +1197,15 @@ const basoRules = [numberRule, ratioHardRule]
                   :can-save="!!lastSavedIds"
                   :patient-age="resultMeta.age"
                   :patient-sex="resultMeta.sex"
+                  :lab-name="resultMeta.labName"
+                  :lab-city="resultMeta.labCity"
+                  :lab-country="resultMeta.labCountry"
+                  :test-date="resultMeta.takenAt"
                   :save-success="successMsg"
                   :save-error="errorMsg"
+                  :summary-items="summaryItems"
+                  :chip-color-fn="chipColor"
+                  :fmt-val-fn="fmtVal"
                   @back="showResult = false"
                   @save="handleSaveHistory"
                 />
@@ -951,6 +1228,114 @@ const basoRules = [numberRule, ratioHardRule]
   overflow: visible !important;
   text-overflow: unset !important;
 }
+
+/* Wizard header */
+.wizard-header {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.wizard-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+}
+
+/* Steps bar + dots (with connecting line) */
+.wizard-steps {
+  position: relative;
+  margin: 24px 8px 24px;
+}
+
+/* base grey line */
+.wizard-bar {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 3px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background-color: #e5e7eb;
+  overflow: hidden;
+}
+
+/* red progress line */
+.wizard-bar-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 999px;
+  background-color: #22c55e;
+  transition: width 0.25s ease;
+}
+
+/* dots aligned on the line */
+.wizard-dots {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* default dot */
+.wizard-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  background-color: #e5e7eb;
+  color: #6b7280;
+  transition: all 0.2s ease;
+}
+
+/* current step (red) */
+.wizard-dot.is-active {
+  background-color: #b71c1c;
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(183, 28, 28, 0.35);
+}
+
+/* completed steps (green) */
+.wizard-dot.is-complete {
+  background-color: #22c55e;
+  color: #ffffff;
+}
+
+/* Step titles */
+.step-title {
+  font-weight: 600;
+  font-size: 1.02rem;
+  margin-bottom: 4px;
+}
+.step-subtitle {
+  font-size: 0.86rem;
+  color: #6b7280;
+  margin-bottom: 16px;
+}
+
+/* Buttons */
+.step-actions .wizard-prev-btn {
+  border-radius: 999px;
+  text-transform: none;
+}
+.step-actions .wizard-next-btn {
+  border-radius: 999px;
+  text-transform: none;
+  color: #ffffff;
+}
+.step-actions .wizard-analyze-btn {
+  border-radius: 999px;
+  text-transform: none;
+}
+
+/* AI markdown */
 .ai-markdown {
   font-family: 'Poppins', sans-serif;
   line-height: 1.6;
@@ -974,30 +1359,39 @@ const basoRules = [numberRule, ratioHardRule]
 }
 
 .result-shell-card {
-  border: 2px solid #b70d37; /* or rgba(var(--v-theme-primary-rgb), 0.9) */
+  border: 2px solid #0d47a1;
   border-radius: 24px;
-  padding: 4px; /* small inset so inner red border doesn't touch edge */
+  padding: 4px;
 }
 
 .header-card {
-  border: 2px solid #0c0a0b; /* fixed color */
-  /* or adaptive: border: 2px solid rgba(var(--v-theme-primary-rgb), 0.9); */
+  border: 2px solid #0d47a1;
   border-radius: 16px;
   background-color: var(--v-theme-surface);
   transition: border-color 0.3s ease;
 }
-
-/* Optional hover effect for a nice feel */
 .header-card:hover {
   border-color: rgba(var(--v-theme-primary-rgb), 1);
   box-shadow: 0 0 8px rgba(var(--v-theme-primary-rgb), 0.2);
 }
 
 .form-card {
-  border: 2px solid #0c0a0b; /* fixed color */
-  /* or adaptive: border: 2px solid rgba(var(--v-theme-primary-rgb), 0.9); */
+  border: 2px solid #0d47a1;
   border-radius: 16px;
   background-color: var(--v-theme-surface);
   transition: border-color 0.3s ease;
+}
+
+/* CBC inputs */
+.cbc-input :deep(.v-field) {
+  border-radius: 8px;
+}
+
+/* Icons color */
+:deep(.form-card .v-input .v-field__prepend-inner .v-icon),
+:deep(.form-card .v-input .v-field__append-inner .v-icon),
+:deep(.form-card .step-title .v-icon),
+:deep(.form-card .text-subtitle-2 .v-icon) {
+  color: #0d47a1 !important;
 }
 </style>

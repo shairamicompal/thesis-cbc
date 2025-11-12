@@ -28,7 +28,7 @@ onMounted(() => { getLoggedStatus() })
     <v-app :theme="theme">
       <v-app-bar
         class="px-3"
-        :color="theme === 'light' ? 'blue-lighten-3' : 'blue-darken-1'"
+        :color="theme === 'light' ? 'blue-lighten-3' : 'light-blue-darken-2'"
         border
       >
         <v-app-bar-nav-icon

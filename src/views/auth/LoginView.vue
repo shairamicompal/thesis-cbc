@@ -23,13 +23,13 @@ const { mobile } = useDisplay()
 
           <!-- Right Column for Login Form -->
           <v-col cols="12" lg="4" :class="mobile ? '' : 'pt-16'">
-            <v-card class="mx-auto" elevation="0" max-width="600">
+            <v-card class="mx-auto" elevation="0" max-width="900">
               <!-- Card Title with Logo -->
               <v-card-title class="text-center pb-0">
                 <v-img
-                  class="mx-auto mb-10"
-                  src="/images/logo-favicon.png"
-                  :width="mobile ? '75%' : '35%'"
+                  class="mx-auto mb-5"
+                  src="/images/logoHS_1.png"
+                  :width="mobile ? '90%' : '65%'"
                 ></v-img>
                 <p>Login</p>
               </v-card-title>
