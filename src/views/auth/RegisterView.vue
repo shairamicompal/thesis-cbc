@@ -27,9 +27,9 @@ const { mobile } = useDisplay()
               <!-- Card Title with Logo -->
               <v-card-title class="text-center">
                 <v-img
-                  class="mx-auto mb-10"
-                  src="/images/logo-favicon.png"
-                  :width="mobile ? '75%' : '35%'"
+                  class="mx-auto"
+                  src="/images/logoHS_1.png"
+                  :width="mobile ? '90%' : '65%'"
                 ></v-img>
                 <p>Registration</p>
               </v-card-title>

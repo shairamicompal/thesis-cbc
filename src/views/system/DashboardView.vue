@@ -2,11 +2,93 @@
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
 import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
-import { ref } from 'vue'
+
+// Import the two destination views
+import InterpreterView from '@/views/system/InterpreterView.vue'
+import HistoryView from '@/views/system/HistoryView.vue'
+
+import { ref, computed, onMounted } from 'vue'
 import { useDisplay } from 'vuetify'
+import { useRouter } from 'vue-router'
+import { useAuthUserStore } from '@/stores/authUser' // adjust path if different
 
 const { mobile } = useDisplay()
 const isDrawerVisible = ref(true)
+const router = useRouter()
+const authUser = useAuthUserStore()
+
+const loadingUser = ref(true)
+const hasVisitedBefore = ref(false)
+
+/* --------- Lifecycle: fetch user + determine greeting --------- */
+onMounted(async () => {
+  if (localStorage.getItem('cbc_home_seen') === '1') {
+    hasVisitedBefore.value = true
+  }
+
+  try {
+    await authUser.getUserInformation()
+  } catch (err) {
+    console.error('Failed to fetch user info:', err)
+  } finally {
+    loadingUser.value = false
+    if (!hasVisitedBefore.value) {
+      localStorage.setItem('cbc_home_seen', '1')
+    }
+  }
+})
+
+/* --------- First name resolver --------- */
+const firstName = computed(() => {
+  const meta = authUser.userData || {}
+  const rawName =
+    meta.full_name ||
+    meta.name ||
+    meta.first_name ||
+    meta.firstname ||
+    meta.display_name ||
+    ''
+
+  if (rawName && typeof rawName === 'string') {
+    const first = rawName.trim().split(' ')[0]
+    if (first) return first
+  }
+
+  if (meta.email && typeof meta.email === 'string') {
+    const local = meta.email.split('@')[0]
+    if (local) return local
+  }
+
+  return 'User'
+})
+
+/* --------- Greeting lines --------- */
+const greetingLine = computed(() => {
+  if (loadingUser.value) {
+    return `Welcome, ${firstName.value}`
+  }
+  return hasVisitedBefore.value
+    ? `Welcome back, ${firstName.value} 👋`
+    : `Welcome, ${firstName.value} 👋`
+})
+
+const subtextLine = computed(() => 'Ready to interpret your latest CBC result?')
+
+/* --------- Navigation handlers --------- */
+const goToAnalysis = () => {
+  // Push directly to the InterpreterView route
+  router.push({
+    path: '/interpreter',
+    component: InterpreterView
+  })
+}
+
+const goToHistory = () => {
+  router.push({
+    path: '/history',
+    component: HistoryView
+  })
+}
 </script>
 
 <template>
@@ -21,130 +103,78 @@ const isDrawerVisible = ref(true)
 
     <!-- content slot -->
     <template #content>
-      <v-container class="py-8 py-md-10" style="max-width: 980px">
-        <!-- Hero -->
-        <v-card rounded="xl" elevation="3" class="pa-6 pa-md-8 mb-6">
-          <div class="text-h5 text-md-h4 font-weight-bold mb-2 brand-title">
-            Welcome to
-            <span class="hema">Hema</span><span class="sense">Sense</span>!
+      <v-container class="py-6 py-md-8" style="max-width: 980px">
+        <!-- Logo + Greeting -->
+        <div class="text-center">
+          <v-img
+            class="mx-auto"
+            src="/images/logoHS_1.png"
+            :width="mobile ? '90%' : '34%'"
+            cover
+          />
+          <div class="text-subtitle-1 font-weight-medium">
+            {{ greetingLine }}
           </div>
-
-          <div class="text-body-2 text-medium-emphasis mb-6">
-            Empowering you with clearer insights, because understanding your health means living
-            smarter.
+          <div class="text-body-2 text-medium-emphasis mt-1">
+            {{ subtextLine }}
           </div>
-
-          <v-row align="center" class="mb-2">
-            <!-- <v-col cols="12" md="6">
-              <v-img
-                src="/images/illustration/ill1.png"
-                aspect-ratio="16/9"
-                class="rounded-lg"
-                cover
-              />
-            </v-col> -->
-
-            <v-col cols="12" md="6">
-              <!-- What you'll get -->
-              <div class="text-subtitle-1 font-weight-bold mb-3">✨ What You’ll Get</div>
-
-              <v-list density="comfortable" lines="one">
-                <v-list-item>
-                  <template #prepend>
-                    <v-avatar size="28" class="mr-2" color="red-lighten-5">
-                      <v-icon color="red-accent-3">mdi-magnify</v-icon>
-                    </v-avatar>
-                  </template>
-                  <v-list-item-title class="font-weight-medium">Smart Analysis</v-list-item-title>
-                  <v-list-item-subtitle>
-                    AI highlights patterns and flags out-of-range values in your CBC.
-                  </v-list-item-subtitle>
-                </v-list-item>
-
-                <v-list-item>
-                  <template #prepend>
-                    <v-avatar size="28" class="mr-2" color="red-lighten-5">
-                      <v-icon color="red-accent-3">mdi-flash</v-icon>
-                    </v-avatar>
-                  </template>
-                  <v-list-item-title class="font-weight-medium">Instant Insights</v-list-item-title>
-                  <v-list-item-subtitle>
-                    Clear, plain-language explanations—no medical jargon.
-                  </v-list-item-subtitle>
-                </v-list-item>
-
-                <v-list-item>
-                  <template #prepend>
-                    <v-avatar size="28" class="mr-2" color="red-lighten-5">
-                      <v-icon color="red-accent-3">mdi-chart-line</v-icon>
-                    </v-avatar>
-                  </template>
-                  <v-list-item-title class="font-weight-medium">Track Trends</v-list-item-title>
-                  <v-list-item-subtitle>
-                    Compare results over time to see progress at a glance.
-                  </v-list-item-subtitle>
-                </v-list-item>
-              </v-list>
-            </v-col>
-          </v-row>
-
-        </v-card>
-
-        <!-- Getting started -->
-        <v-card rounded="xl" elevation="2" class="pa-6">
-          <div class="text-subtitle-1 font-weight-bold mb-4">🚀 Getting Started</div>
-
-          <v-row>
-            <v-col cols="12" md="4" class="mb-4">
-              <div class="d-flex">
-                <v-avatar color="red-accent-3" size="32" class="mr-3">
-                  <span class="text-body-2 font-weight-bold">1</span>
-                </v-avatar>
-                <div>
-                  <div class="font-weight-medium">Input Your CBC</div>
-                  <div class="text-body-2 text-medium-emphasis">
-                    Enter your CBC values (WBC, RBC, Hb, indices, differential).
-                  </div>
-                </div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" md="4" class="mb-4">
-              <div class="d-flex">
-                <v-avatar color="red-accent-3" size="32" class="mr-3">
-                  <span class="text-body-2 font-weight-bold">2</span>
-                </v-avatar>
-                <div>
-                  <div class="font-weight-medium">Choose AI Analyzer</div>
-                  <div class="text-body-2 text-medium-emphasis">
-                    Pick your preferred AI engine to process the results.
-                  </div>
-                </div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" md="4" class="mb-4">
-              <div class="d-flex">
-                <v-avatar color="red-accent-3" size="32" class="mr-3">
-                  <span class="text-body-2 font-weight-bold">3</span>
-                </v-avatar>
-                <div>
-                  <div class="font-weight-medium">Get Interpreted Output</div>
-                  <div class="text-body-2 text-medium-emphasis">
-                    Receive a detailed breakdown, a concise final summary, and suggested next steps
-                    or follow-up actions.
-                  </div>
-                </div>
-              </div>
-            </v-col>
-          </v-row>
-        </v-card>
-
-        <!-- Disclaimer -->
-        <div class="text-caption text-medium-emphasis mt-4">
-          ⚠️ HemaSense provides educational information and does not replace professional medical
-          advice. Always consult a licensed clinician for diagnosis or treatment decisions.
         </div>
+
+        <!-- Primary Action Card -->
+        <v-card class="mx-auto pa-5 text-center home-primary-card">
+          <v-btn
+            color="#b70d37"
+            rounded="pill"
+            size="large"
+            prepend-icon="mdi mdi-water-plus"
+            @click="goToAnalysis"
+          >
+            Start Analysis
+          </v-btn>
+        </v-card>
+
+        <!-- Quick Actions -->
+        <v-row class="mt-6" justify="center" align="stretch" dense>
+          <v-col cols="6" sm="4">
+            <v-card
+              class="pa-3 text-center rounded-lg home-mini-card"
+              variant="outlined"
+              @click="goToHistory"
+            >
+              <v-icon size="22" class="mb-1" color="#1b365d">
+                mdi-history
+              </v-icon>
+              <div class="text-caption font-weight-medium">View History</div>
+              <div class="text-xxs text-medium-emphasis mt-1">
+                All your saved interpreted CBC result.
+              </div>
+            </v-card>
+          </v-col>
+
+          <v-col cols="6" sm="4">
+            <v-card class="pa-3 text-center rounded-lg home-mini-card" variant="outlined">
+              <v-icon size="22" class="mb-1" color="#1b365d">
+                mdi-lightbulb-on-outline
+              </v-icon>
+              <div class="text-caption font-weight-medium">How It Works</div>
+              <div class="text-xxs text-medium-emphasis mt-1">
+                Short guide to reading your results.
+              </div>
+            </v-card>
+          </v-col>
+
+          <v-col cols="12" sm="4">
+            <v-card class="pa-3 text-center rounded-lg home-mini-card" variant="outlined">
+              <v-icon size="22" class="mb-1" color="#1b365d">
+                mdi-shield-check-outline
+              </v-icon>
+              <div class="text-caption font-weight-medium">Secure & Private</div>
+              <div class="text-xxs text-medium-emphasis mt-1">
+                Your CBC data stays encrypted and confidential.
+              </div>
+            </v-card>
+          </v-col>
+        </v-row>
       </v-container>
     </template>
 
@@ -154,45 +184,29 @@ const isDrawerVisible = ref(true)
     </template>
   </AppLayout>
 </template>
+
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lato:wght@700&display=swap');
-
-/* Apply Inter for normal text */
-body,
-.text-body-1,
-.text-body-2,
-.text-medium-emphasis,
-.text-caption {
-  font-family: 'Inter', sans-serif;
+.home-primary-card {
+  backdrop-filter: blur(6px);
+  border-radius: 24px;
+  border: none !important;
+  box-shadow: none !important;
 }
 
-/* Apply Lato for headings + brand */
-.text-h5,
-.text-h4,
-.font-weight-bold,
-.brand-title {
-  font-family: 'Lato', sans-serif;
+.home-mini-card {
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+  border-radius: 18px;
 }
 
-.hema {
-  color: #d32f2f; /* strong medical red */
-  font-weight: 900;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+.home-mini-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
 }
 
-.sense {
-  color: #1976d2; /* deep healthcare blue */
-  font-weight: 900;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+.text-xxs {
+  font-size: 0.68rem;
 }
-
-/* Optional subtle underline effect */
-/* .hema::after {
-  content: '';
-  display: block;
-  height: 3px;
-  background: #f44336;
-  margin-top: 2px;
-  border-radius: 2px;
-} */
 </style>
