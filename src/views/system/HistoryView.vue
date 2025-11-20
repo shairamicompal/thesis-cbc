@@ -3,11 +3,15 @@
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
 import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import { renderMarkdownSafe } from '@/utils/markdown'
 import { useAuthUserStore } from '@/stores/authUser'
+
+/* ====== Export libs ====== */
+import * as htmlToImage from 'html-to-image'
+import jsPDF from 'jspdf'
 
 const authUser = useAuthUserStore()
 const { mobile } = useDisplay()
@@ -38,6 +42,10 @@ const bulkDeleteLoading = ref(false)
 const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref('success')
+
+/* ====== Export refs/state ====== */
+const detailCardRef = ref(null)   // capture root
+const exporting = ref(false)
 
 /* ---------- tiny helpers ---------- */
 
@@ -290,10 +298,6 @@ async function fetchHistory() {
     errorMsg.value = 'Failed to load history.'
     items.value = []
   } else {
-    // Expecting fields like:
-    // id, created_at, pinned, provider, model, result_markdown,
-    // test_age, test_sex, test_lab_name, test_lab_city, test_lab_country, test_date,
-    // wbc, rbc, hb, hct, mcv, mch, mchc, plt, neutrophils, lymphocytes, monocytes, eosinophils, basophils
     items.value = data || []
   }
 
@@ -453,6 +457,188 @@ async function confirmBulkDelete() {
     showSnackbar('Some reports could not be deleted. Please try again.', 'error')
   } else {
     showSnackbar('Selected reports deleted.', 'success')
+  }
+}
+
+/* ====== Export helpers & actions ====== */
+function exportFilename(ext = 'png') {
+  const row = selectedItem.value || {}
+  const date = new Date(row?.created_at || Date.now())
+    .toISOString()
+    .slice(0, 19)
+    .replaceAll(':', '-')
+  const who = `${sexLabel(row.test_sex)}_${row.test_age ?? 'NA'}`
+  const prov = providerLabel(row.provider || '').replace(/\s+/g, '')
+  return `CBC_${prov}_${who}_${date}.${ext}`.replace(/_+/g, '_')
+}
+
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement('a')
+  a.href = dataUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+// make sure the element exists in DOM (and is a real HTML element)
+async function getCaptureEl() {
+  await nextTick()
+  const el = detailCardRef.value
+  return el || null
+}
+
+/**
+ * Helper: temporarily apply wider "export layout" during capture.
+ */
+async function captureWithExportLayout(cb) {
+  const node = await getCaptureEl()
+  if (!node) {
+    showSnackbar('Nothing to export.', 'warning')
+    return null
+  }
+
+  node.classList.add('export-layout')
+  await nextTick()
+
+  try {
+    return await cb(node)
+  } finally {
+    node.classList.remove('export-layout')
+  }
+}
+
+/**
+ * Export as a single "Image" option (PNG under the hood)
+ */
+async function exportAsImage() {
+  exporting.value = true
+  try {
+    const result = await captureWithExportLayout(async (node) => {
+      const pixelRatio = Math.max(window.devicePixelRatio || 1, 2)
+      const opts = {
+        pixelRatio,
+        backgroundColor: '#ffffff',
+        quality: 0.95,
+        style: { background: '#ffffff' },
+        useCORS: true,
+        cacheBust: true,
+        filter: (el) => !el?.classList?.contains('export-actions'),
+      }
+
+      const dataUrl = await htmlToImage.toPng(node, opts)
+      downloadDataUrl(dataUrl, exportFilename('png'))
+      showSnackbar('Exported image successfully.')
+      return true
+    })
+
+    if (!result) return
+  } catch (err) {
+    console.error('exportAsImage error', err)
+    showSnackbar('Export failed. Please try again.', 'error')
+  } finally {
+    exporting.value = false
+  }
+}
+
+/**
+ * Export as multi-page A4 PDF so mobile layout is readable
+ */
+async function exportAsPdf() {
+  exporting.value = true
+  try {
+    const result = await captureWithExportLayout(async (node) => {
+      const pixelRatio = Math.max(window.devicePixelRatio || 1, 2)
+
+      // 1) Render the whole card as a single tall PNG
+      const dataUrl = await htmlToImage.toPng(node, {
+        pixelRatio,
+        backgroundColor: '#ffffff',
+        style: { background: '#ffffff' },
+        useCORS: true,
+        cacheBust: true,
+        filter: (el) => !el?.classList?.contains('export-actions'),
+      })
+
+      // 2) Load it into an <img> so we know its size
+      const img = new Image()
+      img.src = dataUrl
+      await img.decode()
+
+      const imgW = img.width
+      const imgH = img.height
+
+      // 3) Set up an A4 PDF in portrait
+      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const margin = 24
+      const maxW = pageW - margin * 2
+      const maxH = pageH - margin * 2
+
+      // Scale so the image fits the width of the page
+      const scale = maxW / imgW
+
+      // Height of ONE PDF page in original image pixels
+      const sliceHeightPx = Math.floor(maxH / scale)
+
+      let yOffset = 0
+      let pageIndex = 0
+
+      // 4) Slice the tall image into multiple pages
+      while (yOffset < imgH) {
+        const canvas = document.createElement('canvas')
+        canvas.width = imgW
+        canvas.height = Math.min(sliceHeightPx, imgH - yOffset)
+
+        const ctx = canvas.getContext('2d')
+        ctx.imageSmoothingEnabled = true
+
+        // Draw the needed part of the image into the canvas
+        ctx.drawImage(
+          img,
+          0,               // src x
+          yOffset,         // src y
+          imgW,            // src width
+          canvas.height,   // src height
+          0,               // dest x
+          0,               // dest y
+          imgW,            // dest width
+          canvas.height    // dest height
+        )
+
+        const sliceDataUrl = canvas.toDataURL('image/png')
+
+        if (pageIndex > 0) {
+          pdf.addPage()
+        }
+
+        const renderH = canvas.height * scale
+
+        pdf.addImage(
+          sliceDataUrl,
+          'PNG',
+          margin,
+          margin,
+          maxW,
+          renderH
+        )
+
+        yOffset += sliceHeightPx
+        pageIndex += 1
+      }
+
+      pdf.save(exportFilename('pdf'))
+      showSnackbar('Exported PDF successfully.')
+      return true
+    })
+
+    if (!result) return
+  } catch (err) {
+    console.error('exportAsPdf error', err)
+    showSnackbar('PDF export failed. Please try again.', 'error')
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -687,105 +873,168 @@ onMounted(fetchHistory)
             </div>
           </div>
 
+          <!-- Card with inner plain DIV as capture target -->
           <v-card class="detail-card">
-            <v-card-text>
-              <!-- Personal & Lab Details (mirrors ResultPage) -->
-              <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
-                <v-row dense>
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Patient Name</div>
-                    <div class="meta-value">{{ patientName || 'Not set in profile' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Age</div>
-                    <div class="meta-value">{{ selectedItem.test_age ?? '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Sex</div>
-                    <div class="meta-value">{{ sexLabel(selectedItem.test_sex) }}</div>
-                  </v-col>
-
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Laboratory Name</div>
-                    <div class="meta-value">{{ selectedItem.test_lab_name || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Laboratory Location</div>
-                    <div class="meta-value">{{ labLocation || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Test Date</div>
-                    <div class="meta-value">{{ displayTestDate || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Country</div>
-                    <div class="meta-value">{{ selectedItem.test_lab_country || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Saved</div>
-                    <div class="meta-value">{{ formattedDate(selectedItem.created_at) }}</div>
-                  </v-col>
-                </v-row>
-              </v-sheet>
-
-              <!-- Status Overview -->
-              <v-sheet v-if="hasCBCSummary" class="cbc-summary-sheet mt-4" rounded="xl" variant="outlined">
-                <div class="cbc-summary-header d-flex align-center gap-2 mb-2">
-                  <v-icon size="18" class="me-2">mdi-clipboard-pulse-outline</v-icon>
-                  <h3>Status Overview</h3>
+            <!-- Only this area is captured -->
+            <div ref="detailCardRef" class="capture-root">
+              <v-card-text>
+                <div class="mb-3 d-flex align-center">
+                  <span class="section-emoji">🩸</span>
+                  <h3 class="text-subtitle-1 font-weight-bold">
+                    Overview of Your CBC Findings
+                  </h3>
                 </div>
 
-                <v-row dense>
-                  <v-col
-                    v-for="item in selectedSummaryItems"
-                    :key="item.key"
-                    cols="12" sm="6" md="4" lg="3" class="mb-1"
+                <!-- TOP SECTION: Personal details + Status Overview side-by-side in export -->
+                <div class="top-section">
+                  <!-- Personal & Lab Details -->
+                  <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
+                    <v-row dense>
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Patient Name</div>
+                        <div class="meta-value">{{ patientName || 'Not set in profile' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Age</div>
+                        <div class="meta-value">{{ selectedItem.test_age ?? '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Sex</div>
+                        <div class="meta-value">{{ sexLabel(selectedItem.test_sex) }}</div>
+                      </v-col>
+
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Laboratory Name</div>
+                        <div class="meta-value">{{ selectedItem.test_lab_name || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Laboratory Location</div>
+                        <div class="meta-value">{{ labLocation || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Test Date</div>
+                        <div class="meta-value">{{ displayTestDate || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Country</div>
+                        <div class="meta-value">{{ selectedItem.test_lab_country || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Saved</div>
+                        <div class="meta-value">{{ formattedDate(selectedItem.created_at) }}</div>
+                      </v-col>
+                    </v-row>
+                  </v-sheet>
+
+                  <!-- Status Overview -->
+                  <v-sheet
+                    v-if="hasCBCSummary"
+                    class="cbc-summary-sheet"
+                    rounded="xl"
+                    variant="outlined"
                   >
-                    <div class="cbc-item">
-                      <div class="cbc-label">{{ item.label }}</div>
-                      <div class="cbc-value-line">
-                        <span class="cbc-value">{{ fmtVal(item) }}</span>
-                        <v-chip
-                          v-if="item.status && item.status !== '—'"
-                          :color="chipColor(item.status)"
-                          size="x-small"
-                          variant="elevated"
-                          class="status-chip text-uppercase font-weight-bold"
-                        >
-                          {{ item.status }}
-                        </v-chip>
-                      </div>
-                      <div class="cbc-ref">Ref: {{ formatRef(item) }}</div>
+                    <div class="cbc-summary-header d-flex align-center gap-2 mb-2">
+                      <span class="section-emoji small">📋</span>
+                      <h3>Status Overview</h3>
                     </div>
-                  </v-col>
-                </v-row>
-              </v-sheet>
 
-              <!-- Interpretation -->
-              <div class="mt-6 ai-section">
-                <div class="ai-header d-flex align-center gap-2 mb-2">
-                  <v-icon color="#b70d37" class="me-2">mdi-robot-outline</v-icon>
-                  <span class="ai-title">AI-Assisted Explanation</span>
+                    <v-row dense>
+                      <v-col
+                        v-for="item in selectedSummaryItems"
+                        :key="item.key"
+                        cols="12"
+                        sm="6"
+                        md="6"
+                        lg="6"
+                        class="mb-1"
+                      >
+                        <div class="cbc-item">
+                          <div class="cbc-label">{{ item.label }}</div>
+                          <div class="cbc-value-line">
+                            <span class="cbc-value">{{ fmtVal(item) }}</span>
+                            <v-chip
+                              v-if="item.status && item.status !== '—'"
+                              :color="chipColor(item.status)"
+                              size="x-small"
+                              variant="elevated"
+                              class="status-chip text-uppercase font-weight-bold"
+                            >
+                              {{ item.status }}
+                            </v-chip>
+                          </div>
+                          <div class="cbc-ref">Ref: {{ formatRef(item) }}</div>
+                        </div>
+                      </v-col>
+                    </v-row>
+                  </v-sheet>
                 </div>
 
-                <v-alert type="warning" variant="tonal" density="comfortable" class="mb-4">
-                  This explanation is for educational support only and must not replace assessment by a
-                  licensed physician. If you feel unwell or your results are significantly abnormal, please
-                  consult your doctor.
-                </v-alert>
+                <!-- Interpretation -->
+                <div class="mt-6 ai-section">
+                  <div class="ai-header d-flex align-center gap-2 mb-2">
+                    <span class="section-emoji">🤖</span>
+                    <span class="ai-title">AI-Assisted Explanation</span>
+                  </div>
 
-                <div v-if="selectedHtml" class="detail-markdown" v-html="selectedHtml"></div>
-                <div v-else class="text-grey-darken-1 text-body-2">
-                  No interpretation found for this entry.
+                  <v-alert type="warning" variant="tonal" density="comfortable" class="mb-4">
+                    This explanation is for educational support only and must not replace assessment by a
+                    licensed physician. If you feel unwell or your results are significantly abnormal, please
+                    consult your doctor.
+                  </v-alert>
+
+                  <div v-if="selectedHtml" class="detail-markdown" v-html="selectedHtml"></div>
+                  <div v-else class="text-grey-darken-1 text-body-2">
+                    No interpretation found for this entry.
+                  </div>
                 </div>
-              </div>
-            </v-card-text>
+              </v-card-text>
+            </div>
+
+            <!-- Export dropdown (excluded from capture) -->
+            <div class="export-actions d-flex align-center justify-end px-4 pb-4 ga-2">
+              <v-menu location="bottom end" transition="fade-transition">
+                <template #activator="{ props }">
+                  <v-btn
+                    v-bind="props"
+                    size="small"
+                    color="primary"
+                    variant="flat"
+                    prepend-icon="mdi-tray-arrow-down"
+                    :loading="exporting"
+                    :disabled="exporting"
+                  >
+                    Export
+                    <v-icon end class="ms-1">mdi-chevron-down</v-icon>
+                  </v-btn>
+                </template>
+
+                <v-list density="compact" min-width="180">
+                  <v-list-item @click="exportAsImage">
+                    <template #prepend>
+                      <v-icon>mdi-image-outline</v-icon>
+                    </template>
+                    <v-list-item-title>Image</v-list-item-title>
+                    <v-list-item-subtitle>PNG export</v-list-item-subtitle>
+                  </v-list-item>
+
+                  <v-divider class="my-1" />
+
+                  <v-list-item @click="exportAsPdf">
+                    <template #prepend>
+                      <v-icon>mdi-file-pdf-box</v-icon>
+                    </template>
+                    <v-list-item-title>PDF</v-list-item-title>
+                    <v-list-item-subtitle>For printing & sharing</v-list-item-subtitle>
+                  </v-list-item>
+                </v-list>
+              </v-menu>
+            </div>
           </v-card>
         </div>
 
@@ -912,8 +1161,38 @@ onMounted(fetchHistory)
 .detail-card { border-radius: 24px; border: 2px solid #0D47A1; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); padding: 2px; }
 .detail-card :deep(.v-card-text) { padding: 18px 18px 20px; }
 
+/* Capture root export layout */
+.capture-root.export-layout {
+  width: 780px;           /* wider, page-like for export */
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+/* Emoji section icons */
+.section-emoji {
+  margin-right: 6px;
+  font-size: 1.1rem;
+}
+.section-emoji.small {
+  font-size: 0.9rem;
+}
+
+/* TOP SECTION layout */
+.top-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.capture-root.export-layout .top-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: flex-start;
+}
+
 /* Meta section */
-.meta-sheet { padding: 10px 20px; border: 2px solid #0d47a1; }
+.meta-sheet { padding: 10px 20px; border: 2px solid #b3bbc9; }
 .meta-label {
   font-size: 0.7rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.06em;
 }
@@ -950,6 +1229,7 @@ onMounted(fetchHistory)
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
+/* Bulk-delete FAB */
 .delete-fab {
   position: fixed !important; right: 18px !important; bottom: 110px !important;
   width: 52px; height: 52px; border-radius: 999px; min-width: 0; padding: 0;
@@ -967,4 +1247,10 @@ onMounted(fetchHistory)
 }
 
 .cancel-select-btn { color: #b70d37 !important; font-weight: 600; }
+
+/* Export bar styles */
+.export-actions :deep(.v-btn) {
+  text-transform: none;
+  font-weight: 600;
+}
 </style>

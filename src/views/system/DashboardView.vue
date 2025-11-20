@@ -10,7 +10,7 @@ import HistoryView from '@/views/system/HistoryView.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useDisplay } from 'vuetify'
 import { useRouter } from 'vue-router'
-import { useAuthUserStore } from '@/stores/authUser' // adjust path if different
+import { useAuthUserStore } from '@/stores/authUser'
 
 const { mobile } = useDisplay()
 const isDrawerVisible = ref(true)
@@ -20,7 +20,7 @@ const authUser = useAuthUserStore()
 const loadingUser = ref(true)
 const hasVisitedBefore = ref(false)
 
-/* --------- Lifecycle: fetch user + determine greeting --------- */
+/* -------- Lifecycle -------- */
 onMounted(async () => {
   if (localStorage.getItem('cbc_home_seen') === '1') {
     hasVisitedBefore.value = true
@@ -38,7 +38,7 @@ onMounted(async () => {
   }
 })
 
-/* --------- First name resolver --------- */
+/* -------- First name -------- */
 const firstName = computed(() => {
   const meta = authUser.userData || {}
   const rawName =
@@ -62,7 +62,7 @@ const firstName = computed(() => {
   return 'User'
 })
 
-/* --------- Greeting lines --------- */
+/* -------- Greeting lines -------- */
 const greetingLine = computed(() => {
   if (loadingUser.value) {
     return `Welcome, ${firstName.value}`
@@ -74,9 +74,8 @@ const greetingLine = computed(() => {
 
 const subtextLine = computed(() => 'Ready to interpret your latest CBC result?')
 
-/* --------- Navigation handlers --------- */
+/* -------- Navigation -------- */
 const goToAnalysis = () => {
-  // Push directly to the InterpreterView route
   router.push({
     path: '/interpreter',
     component: InterpreterView
@@ -105,31 +104,33 @@ const goToHistory = () => {
     <template #content>
       <v-container class="py-6 py-md-8" style="max-width: 980px">
         <!-- Logo + Greeting -->
-        <div class="text-center">
+        <v-sheet color="transparent" elevation="0" class="text-center">
           <v-img
-            class="mx-auto"
+            class="mx-auto bg-transparent logo-img"
             src="/images/logoHS_1.png"
             :width="mobile ? '90%' : '34%'"
             cover
+            :style="{ backgroundColor: 'transparent' }"
           />
-          <div class="text-subtitle-1 font-weight-medium">
+          <div class="welcome-head mt-2">
             {{ greetingLine }}
           </div>
-          <div class="text-body-2 text-medium-emphasis mt-1">
+          <div class="welcome-sub mt-1">
             {{ subtextLine }}
           </div>
-        </div>
+        </v-sheet>
 
-        <!-- Primary Action Card -->
-        <v-card class="mx-auto pa-5 text-center home-primary-card">
+        <!-- Primary Action -->
+        <v-card class="mx-auto text-center home-primary-card">
           <v-btn
             color="#b70d37"
             rounded="pill"
             size="large"
             prepend-icon="mdi mdi-water-plus"
+            class="start-btn"
             @click="goToAnalysis"
           >
-            Start Analysis
+            START ANALYSIS
           </v-btn>
         </v-card>
 
@@ -186,21 +187,45 @@ const goToHistory = () => {
 </template>
 
 <style scoped>
-.home-primary-card {
-  backdrop-filter: blur(6px);
-  border-radius: 24px;
-  border: none !important;
-  box-shadow: none !important;
+/* ---- Welcome text ---- */
+.welcome-head {
+  font-size: clamp(1.05rem, 2.1vw, 1.25rem);
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
+.welcome-sub {
+  font-size: clamp(0.85rem, 1.6vw, 0.95rem);
+  color: rgba(var(--v-theme-on-surface), 0.7);
+}
+
+/* ---- Logo ---- */
+.logo-img :deep(img) {
+  background: transparent !important;
+}
+
+/* ---- Primary action area ---- */
+.home-primary-card {
+  padding: 24px 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.start-btn {
+  padding-inline: 28px;
+  height: 44px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+/* ---- Mini cards ---- */
 .home-mini-card {
   cursor: pointer;
-  transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
   border-radius: 18px;
 }
-
 .home-mini-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
