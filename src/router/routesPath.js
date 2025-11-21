@@ -6,7 +6,7 @@ import NotFoundView from '@/views/errors/NotFoundView.vue'
 import AccountSettingsView from '@/views/system/AccountSettingsView.vue'
 import InterpreterView from '@/views/system/InterpreterView.vue'
 import HistoryView from '@/views/system/HistoryView.vue'
-import AnalysisView from '@/views/system/AnalysisView.vue'
+import SupportView from '@/views/system/SupportView.vue'
 import CbcInputsView from '@/views/system/CbcInputsView.vue'
 // 👉 Routes
 export const routesPath = [
@@ -55,9 +55,9 @@ export const routesPath = [
         meta: { requiresAuth: true }
     },
     {
-        path: '/analysis',
-        name: 'analysis',
-        component: AnalysisView,
+        path: '/support',
+        name: 'support',
+        component: SupportView,
         meta: { requiresAuth: true }
     },
     {

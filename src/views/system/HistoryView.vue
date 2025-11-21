@@ -71,7 +71,7 @@ function providerPillColor(provider) {
 function providerPillTextColor(provider) {
   if (provider === 'groq') return '#4B5CFF'
   if (provider === 'openai') return '#10A37F'
-  return '#555555'
+  return '#10A37F'
 }
 
 function formattedDate(ts) {
@@ -91,7 +91,7 @@ function preview(md, length = 90) {
   return text.length > length ? text.slice(0, length) + '…' : text
 }
 
-/* ---------- RANGES & SUMMARY (reuse of ResultPage logic) ---------- */
+/* ---------- RANGES & SUMMARY ---------- */
 const ranges = {
   wbc:   { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
   rbcM:  { low: 4.5, high: 5.2, unit: '×10¹²/L', label: 'RBC' },
@@ -253,7 +253,6 @@ const selectedHtml = computed(() => {
   return renderMarkdownSafe(selectedItem.value.result_markdown)
 })
 
-/* -------- patient name (match ResultPage) -------- */
 const patientName = computed(() => {
   const meta = authUser?.userData || {}
   const first =
@@ -305,10 +304,7 @@ async function fetchHistory() {
 }
 
 /**
- * Filtered + sorted items:
- * - filter by provider
- * - pinned first
- * - newest created_at within each group
+ * Filtered + sorted items
  */
 const filteredItems = computed(() => {
   let base = items.value
@@ -410,9 +406,6 @@ function cancelBulkDelete() {
   bulkDeleteDialog.value = false
 }
 
-/**
- * Delete all selected (non-pinned) reports.
- */
 async function confirmBulkDelete() {
   if (!hasSelection.value) return
 
@@ -481,7 +474,6 @@ function downloadDataUrl(dataUrl, filename) {
   a.remove()
 }
 
-// make sure the element exists in DOM (and is a real HTML element)
 async function getCaptureEl() {
   await nextTick()
   const el = detailCardRef.value
@@ -489,33 +481,70 @@ async function getCaptureEl() {
 }
 
 /**
- * Helper: temporarily apply wider "export layout" during capture.
+ * Capture an OFFSCREEN CLONE with "export layout"
  */
 async function captureWithExportLayout(cb) {
-  const node = await getCaptureEl()
-  if (!node) {
+  const sourceNode = await getCaptureEl()
+  if (!sourceNode) {
     showSnackbar('Nothing to export.', 'warning')
     return null
   }
 
-  node.classList.add('export-layout')
+  const body = document.body
+  const originalOverflow = body.style.overflow
+
+  const wrapper = document.createElement('div')
+  wrapper.style.position = 'fixed'
+  wrapper.style.left = '-99999px'
+  wrapper.style.top = '0'
+  wrapper.style.padding = '0'
+  wrapper.style.margin = '0'
+  wrapper.style.zIndex = '-1'
+
+  const clone = sourceNode.cloneNode(true)
+  clone.classList.add('export-layout', 'export-clone')
+
+  // === FORCE Status Overview grid into 2 columns on the clone ===
+  const summaryRow =
+    clone.querySelector('.cbc-summary-sheet .v-row') ||
+    clone.querySelector('.cbc-summary-sheet [class*="v-row"]')
+  if (summaryRow) {
+    summaryRow.style.marginLeft = '0'
+    summaryRow.style.marginRight = '0'
+
+    Array.from(summaryRow.children).forEach((col) => {
+      if (!(col instanceof HTMLElement)) return
+      col.style.flex = '0 0 50%'
+      col.style.maxWidth = '50%'
+      col.style.boxSizing = 'border-box'
+    })
+  }
+  // =============================================================
+
+  wrapper.appendChild(clone)
+  body.appendChild(wrapper)
+
+  body.style.overflow = 'hidden'
+
   await nextTick()
 
   try {
-    return await cb(node)
+    const result = await cb(clone)
+    return result
   } finally {
-    node.classList.remove('export-layout')
+    body.style.overflow = originalOverflow
+    body.removeChild(wrapper)
   }
 }
 
 /**
- * Export as a single "Image" option (PNG under the hood)
+ * Export as PNG image
  */
 async function exportAsImage() {
   exporting.value = true
   try {
     const result = await captureWithExportLayout(async (node) => {
-      const pixelRatio = Math.max(window.devicePixelRatio || 1, 2)
+      const pixelRatio = 2
       const opts = {
         pixelRatio,
         backgroundColor: '#ffffff',
@@ -542,15 +571,27 @@ async function exportAsImage() {
 }
 
 /**
- * Export as multi-page A4 PDF so mobile layout is readable
+ * Export as multi-page A4 PDF
  */
 async function exportAsPdf() {
   exporting.value = true
   try {
     const result = await captureWithExportLayout(async (node) => {
-      const pixelRatio = Math.max(window.devicePixelRatio || 1, 2)
+      const pixelRatio = 2
 
-      // 1) Render the whole card as a single tall PNG
+      let alertBand = null
+      const alertEl = node.querySelector('.educational-alert')
+      if (alertEl) {
+        const rootRect = node.getBoundingClientRect()
+        const alertRect = alertEl.getBoundingClientRect()
+        const topInRoot = alertRect.top - rootRect.top
+        const bottomInRoot = alertRect.bottom - rootRect.top
+        alertBand = {
+          topPx: topInRoot * pixelRatio,
+          bottomPx: bottomInRoot * pixelRatio,
+        }
+      }
+
       const dataUrl = await htmlToImage.toPng(node, {
         pixelRatio,
         backgroundColor: '#ffffff',
@@ -560,7 +601,6 @@ async function exportAsPdf() {
         filter: (el) => !el?.classList?.contains('export-actions'),
       })
 
-      // 2) Load it into an <img> so we know its size
       const img = new Image()
       img.src = dataUrl
       await img.decode()
@@ -568,7 +608,6 @@ async function exportAsPdf() {
       const imgW = img.width
       const imgH = img.height
 
-      // 3) Set up an A4 PDF in portrait
       const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
       const pageW = pdf.internal.pageSize.getWidth()
       const pageH = pdf.internal.pageSize.getHeight()
@@ -576,35 +615,48 @@ async function exportAsPdf() {
       const maxW = pageW - margin * 2
       const maxH = pageH - margin * 2
 
-      // Scale so the image fits the width of the page
       const scale = maxW / imgW
-
-      // Height of ONE PDF page in original image pixels
-      const sliceHeightPx = Math.floor(maxH / scale)
+      const maxSliceHeightPx = Math.floor(maxH / scale)
 
       let yOffset = 0
       let pageIndex = 0
 
-      // 4) Slice the tall image into multiple pages
       while (yOffset < imgH) {
+        let sliceHeightPx = Math.min(maxSliceHeightPx, imgH - yOffset)
+
+        if (alertBand) {
+          const alertTop = alertBand.topPx
+          const alertBottom = alertBand.bottomPx
+          const sliceTop = yOffset
+          const sliceBottom = yOffset + sliceHeightPx
+
+          if (
+            sliceTop < alertTop &&
+            sliceBottom > alertTop &&
+            sliceBottom < alertBottom
+          ) {
+            const safeHeight = Math.max(Math.floor(alertTop - sliceTop - 6), 80)
+            sliceHeightPx = safeHeight
+          }
+        }
+
         const canvas = document.createElement('canvas')
         canvas.width = imgW
-        canvas.height = Math.min(sliceHeightPx, imgH - yOffset)
+        canvas.height = sliceHeightPx
 
         const ctx = canvas.getContext('2d')
         ctx.imageSmoothingEnabled = true
 
-        // Draw the needed part of the image into the canvas
         ctx.drawImage(
           img,
-          0,               // src x
-          yOffset,         // src y
-          imgW,            // src width
-          canvas.height,   // src height
-          0,               // dest x
-          0,               // dest y
-          imgW,            // dest width
-          canvas.height    // dest height
+          0,
+          yOffset,
+          imgW,
+          sliceHeightPx,
+          0,
+          0,
+          imgW,
+          sliceHeightPx
         )
 
         const sliceDataUrl = canvas.toDataURL('image/png')
@@ -613,7 +665,7 @@ async function exportAsPdf() {
           pdf.addPage()
         }
 
-        const renderH = canvas.height * scale
+        const renderH = sliceHeightPx * scale
 
         pdf.addImage(
           sliceDataUrl,
@@ -635,7 +687,7 @@ async function exportAsPdf() {
 
     if (!result) return
   } catch (err) {
-    console.error('exportAsPdf error', err)
+    console.error('PDF export failed', err)
     showSnackbar('PDF export failed. Please try again.', 'error')
   } finally {
     exporting.value = false
@@ -879,13 +931,13 @@ onMounted(fetchHistory)
             <div ref="detailCardRef" class="capture-root">
               <v-card-text>
                 <div class="mb-3 d-flex align-center">
-                  <span class="section-emoji">🩸</span>
+                  <span class="section-emoji">🏥</span>
                   <h3 class="text-subtitle-1 font-weight-bold">
                     Overview of Your CBC Findings
                   </h3>
                 </div>
 
-                <!-- TOP SECTION: Personal details + Status Overview side-by-side in export -->
+                <!-- TOP SECTION: Personal details + Status Overview -->
                 <div class="top-section">
                   <!-- Personal & Lab Details -->
                   <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
@@ -982,16 +1034,48 @@ onMounted(fetchHistory)
                     <span class="ai-title">AI-Assisted Explanation</span>
                   </div>
 
-                  <v-alert type="warning" variant="tonal" density="comfortable" class="mb-4">
-                    This explanation is for educational support only and must not replace assessment by a
-                    licensed physician. If you feel unwell or your results are significantly abnormal, please
-                    consult your doctor.
+                  <div class="ai-model-line mb-2">
+                    <span class="ai-model-label me-2">Model used</span>
+                    <span class="ai-model-value">
+                      {{ providerLabel(selectedItem.provider) }}
+                      <span v-if="selectedItem.model"> ({{ selectedItem.model }})</span>
+                    </span>
+                  </div>
+
+                  <v-alert
+                    type="warning"
+                    variant="tonal"
+                    density="comfortable"
+                    class="mb-4 educational-alert"
+                    border="start"
+                  >
+                    <template #prepend>
+                      <span class="educational-alert-emoji">⚠️</span>
+                    </template>
+
+                    <span class="educational-alert-text">
+                      This explanation is for educational support only and must not replace assessment
+                      by a licensed physician. If you feel unwell or your results are significantly
+                      abnormal, please consult your doctor.
+                    </span>
                   </v-alert>
 
                   <div v-if="selectedHtml" class="detail-markdown" v-html="selectedHtml"></div>
                   <div v-else class="text-grey-darken-1 text-body-2">
                     No interpretation found for this entry.
                   </div>
+                </div>
+
+                <!-- HemaSense footer INSIDE capture area (shows on image/PDF) -->
+                <div class="export-footer">
+                  <img
+                    src="/images/logo-favicon.png"
+                    alt="HemaSense logo"
+                    class="export-footer-logo"
+                  />
+                  <span class="export-footer-text">
+                    © 2025 HemaSense · All rights reserved
+                  </span>
                 </div>
               </v-card-text>
             </div>
@@ -1163,9 +1247,21 @@ onMounted(fetchHistory)
 
 /* Capture root export layout */
 .capture-root.export-layout {
-  width: 780px;           /* wider, page-like for export */
+  width: 780px;
   max-width: 780px;
   margin: 0 auto;
+}
+
+/* During export, remove transitions/animations on the clone for stable rendering */
+.capture-root.export-layout,
+.capture-root.export-layout * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Extra clean look for offscreen export clone */
+.export-clone {
+  box-shadow: none !important;
 }
 
 /* Emoji section icons */
@@ -1184,11 +1280,11 @@ onMounted(fetchHistory)
   gap: 12px;
 }
 
+/* For export: keep them stacked (Personal Info full width, then Status Overview) */
 .capture-root.export-layout .top-section {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 14px;
-  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* Meta section */
@@ -1208,6 +1304,16 @@ onMounted(fetchHistory)
 .cbc-ref { font-size: 0.68rem; }
 .status-chip { font-size: 0.6rem; }
 
+/* Force 2 columns for Status Overview items ONLY on export clone */
+.capture-root.export-layout .cbc-summary-sheet :deep(.v-row) {
+  margin-left: 0;
+  margin-right: 0;
+}
+.capture-root.export-layout .cbc-summary-sheet :deep(.v-col) {
+  flex: 0 0 50% !important;
+  max-width: 50% !important;
+}
+
 /* AI Section */
 .ai-section { margin-top: 18px; }
 .ai-header .ai-title { font-weight: 600; font-size: 0.98rem; }
@@ -1218,9 +1324,62 @@ onMounted(fetchHistory)
 .detail-markdown h2, .detail-markdown h3 {
   margin-top: 0.65rem; margin-bottom: 0.2rem; font-size: 0.96rem; font-weight: 600;
 }
-.detail-markdown ul, .detail-markdown ol { padding-left: 1.4rem; margin: 0.3rem 0 0.55rem; }
+.detail-markdown ul, .detail-markdown ol {
+  padding-left: 1.4rem;
+  margin: 0.3rem 0 0.55rem;
+}
 .detail-markdown li { margin: 0.14rem 0; }
 .detail-markdown strong { font-weight: 600; }
+
+/* Tighter bullets + text only on export clone to avoid big blank spaces */
+.capture-root.export-layout .detail-markdown {
+  line-height: 1.45;
+}
+.capture-root.export-layout .detail-markdown ul,
+.capture-root.export-layout .detail-markdown ol {
+  margin: 0.08rem 0 0.18rem;
+}
+.capture-root.export-layout .detail-markdown li {
+  margin: 0.03rem 0;
+}
+.capture-root.export-layout .detail-markdown li p {
+  margin-top: 0.02rem;
+  margin-bottom: 0.02rem;
+}
+.capture-root.export-layout .detail-markdown p {
+  margin-top: 0.12rem;
+  margin-bottom: 0.12rem;
+}
+
+/* Warning banner text */
+.educational-alert-emoji {
+  margin-right: 6px;
+}
+.educational-alert-text {
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+/* HemaSense footer inside capture area */
+.export-footer {
+  margin-top: 24px;
+  padding-top: 10px;
+  border-top: 1px dashed #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  opacity: 0.85;
+}
+.export-footer-logo {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+.export-footer-text {
+  font-size: 0.7rem;
+  color: #6b7280;
+}
 
 /* transitions + misc */
 .history-list-move { transition: transform 0.2s ease, opacity 0.2s ease; }
