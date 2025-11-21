@@ -1,6 +1,6 @@
 // 👉 Main Navigation; Title, Icon
 export const mainNav = [
-  ['History', 'mdi-history'],
+  ['Support', 'mdi-lifebuoy'],     // was 'History'
   ['Interpreter', 'mdi-robot'],
-  ['Analysis', 'mdi-file-document'],
+  ['History', 'mdi-file-document'] // was 'Analysis'
 ]

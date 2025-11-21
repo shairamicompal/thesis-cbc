@@ -3,11 +3,15 @@
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
 import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import { renderMarkdownSafe } from '@/utils/markdown'
 import { useAuthUserStore } from '@/stores/authUser'
+
+/* ====== Export libs ====== */
+import * as htmlToImage from 'html-to-image'
+import jsPDF from 'jspdf'
 
 const authUser = useAuthUserStore()
 const { mobile } = useDisplay()
@@ -39,6 +43,10 @@ const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref('success')
 
+/* ====== Export refs/state ====== */
+const detailCardRef = ref(null)   // capture root
+const exporting = ref(false)
+
 /* ---------- tiny helpers ---------- */
 
 function sexLabel(sex) {
@@ -63,7 +71,7 @@ function providerPillColor(provider) {
 function providerPillTextColor(provider) {
   if (provider === 'groq') return '#4B5CFF'
   if (provider === 'openai') return '#10A37F'
-  return '#555555'
+  return '#10A37F'
 }
 
 function formattedDate(ts) {
@@ -83,7 +91,7 @@ function preview(md, length = 90) {
   return text.length > length ? text.slice(0, length) + '…' : text
 }
 
-/* ---------- RANGES & SUMMARY (reuse of ResultPage logic) ---------- */
+/* ---------- RANGES & SUMMARY ---------- */
 const ranges = {
   wbc:   { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
   rbcM:  { low: 4.5, high: 5.2, unit: '×10¹²/L', label: 'RBC' },
@@ -245,7 +253,6 @@ const selectedHtml = computed(() => {
   return renderMarkdownSafe(selectedItem.value.result_markdown)
 })
 
-/* -------- patient name (match ResultPage) -------- */
 const patientName = computed(() => {
   const meta = authUser?.userData || {}
   const first =
@@ -290,10 +297,6 @@ async function fetchHistory() {
     errorMsg.value = 'Failed to load history.'
     items.value = []
   } else {
-    // Expecting fields like:
-    // id, created_at, pinned, provider, model, result_markdown,
-    // test_age, test_sex, test_lab_name, test_lab_city, test_lab_country, test_date,
-    // wbc, rbc, hb, hct, mcv, mch, mchc, plt, neutrophils, lymphocytes, monocytes, eosinophils, basophils
     items.value = data || []
   }
 
@@ -301,10 +304,7 @@ async function fetchHistory() {
 }
 
 /**
- * Filtered + sorted items:
- * - filter by provider
- * - pinned first
- * - newest created_at within each group
+ * Filtered + sorted items
  */
 const filteredItems = computed(() => {
   let base = items.value
@@ -406,9 +406,6 @@ function cancelBulkDelete() {
   bulkDeleteDialog.value = false
 }
 
-/**
- * Delete all selected (non-pinned) reports.
- */
 async function confirmBulkDelete() {
   if (!hasSelection.value) return
 
@@ -453,6 +450,247 @@ async function confirmBulkDelete() {
     showSnackbar('Some reports could not be deleted. Please try again.', 'error')
   } else {
     showSnackbar('Selected reports deleted.', 'success')
+  }
+}
+
+/* ====== Export helpers & actions ====== */
+function exportFilename(ext = 'png') {
+  const row = selectedItem.value || {}
+  const date = new Date(row?.created_at || Date.now())
+    .toISOString()
+    .slice(0, 19)
+    .replaceAll(':', '-')
+  const who = `${sexLabel(row.test_sex)}_${row.test_age ?? 'NA'}`
+  const prov = providerLabel(row.provider || '').replace(/\s+/g, '')
+  return `CBC_${prov}_${who}_${date}.${ext}`.replace(/_+/g, '_')
+}
+
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement('a')
+  a.href = dataUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+async function getCaptureEl() {
+  await nextTick()
+  const el = detailCardRef.value
+  return el || null
+}
+
+/**
+ * Capture an OFFSCREEN CLONE with "export layout"
+ */
+async function captureWithExportLayout(cb) {
+  const sourceNode = await getCaptureEl()
+  if (!sourceNode) {
+    showSnackbar('Nothing to export.', 'warning')
+    return null
+  }
+
+  const body = document.body
+  const originalOverflow = body.style.overflow
+
+  const wrapper = document.createElement('div')
+  wrapper.style.position = 'fixed'
+  wrapper.style.left = '-99999px'
+  wrapper.style.top = '0'
+  wrapper.style.padding = '0'
+  wrapper.style.margin = '0'
+  wrapper.style.zIndex = '-1'
+
+  const clone = sourceNode.cloneNode(true)
+  clone.classList.add('export-layout', 'export-clone')
+
+  // === FORCE Status Overview grid into 2 columns on the clone ===
+  const summaryRow =
+    clone.querySelector('.cbc-summary-sheet .v-row') ||
+    clone.querySelector('.cbc-summary-sheet [class*="v-row"]')
+  if (summaryRow) {
+    summaryRow.style.marginLeft = '0'
+    summaryRow.style.marginRight = '0'
+
+    Array.from(summaryRow.children).forEach((col) => {
+      if (!(col instanceof HTMLElement)) return
+      col.style.flex = '0 0 50%'
+      col.style.maxWidth = '50%'
+      col.style.boxSizing = 'border-box'
+    })
+  }
+  // =============================================================
+
+  wrapper.appendChild(clone)
+  body.appendChild(wrapper)
+
+  body.style.overflow = 'hidden'
+
+  await nextTick()
+
+  try {
+    const result = await cb(clone)
+    return result
+  } finally {
+    body.style.overflow = originalOverflow
+    body.removeChild(wrapper)
+  }
+}
+
+/**
+ * Export as PNG image
+ */
+async function exportAsImage() {
+  exporting.value = true
+  try {
+    const result = await captureWithExportLayout(async (node) => {
+      const pixelRatio = 2
+      const opts = {
+        pixelRatio,
+        backgroundColor: '#ffffff',
+        quality: 0.95,
+        style: { background: '#ffffff' },
+        useCORS: true,
+        cacheBust: true,
+        filter: (el) => !el?.classList?.contains('export-actions'),
+      }
+
+      const dataUrl = await htmlToImage.toPng(node, opts)
+      downloadDataUrl(dataUrl, exportFilename('png'))
+      showSnackbar('Exported image successfully.')
+      return true
+    })
+
+    if (!result) return
+  } catch (err) {
+    console.error('exportAsImage error', err)
+    showSnackbar('Export failed. Please try again.', 'error')
+  } finally {
+    exporting.value = false
+  }
+}
+
+/**
+ * Export as multi-page A4 PDF
+ */
+async function exportAsPdf() {
+  exporting.value = true
+  try {
+    const result = await captureWithExportLayout(async (node) => {
+      const pixelRatio = 2
+
+      let alertBand = null
+      const alertEl = node.querySelector('.educational-alert')
+      if (alertEl) {
+        const rootRect = node.getBoundingClientRect()
+        const alertRect = alertEl.getBoundingClientRect()
+        const topInRoot = alertRect.top - rootRect.top
+        const bottomInRoot = alertRect.bottom - rootRect.top
+        alertBand = {
+          topPx: topInRoot * pixelRatio,
+          bottomPx: bottomInRoot * pixelRatio,
+        }
+      }
+
+      const dataUrl = await htmlToImage.toPng(node, {
+        pixelRatio,
+        backgroundColor: '#ffffff',
+        style: { background: '#ffffff' },
+        useCORS: true,
+        cacheBust: true,
+        filter: (el) => !el?.classList?.contains('export-actions'),
+      })
+
+      const img = new Image()
+      img.src = dataUrl
+      await img.decode()
+
+      const imgW = img.width
+      const imgH = img.height
+
+      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const margin = 24
+      const maxW = pageW - margin * 2
+      const maxH = pageH - margin * 2
+
+      const scale = maxW / imgW
+      const maxSliceHeightPx = Math.floor(maxH / scale)
+
+      let yOffset = 0
+      let pageIndex = 0
+
+      while (yOffset < imgH) {
+        let sliceHeightPx = Math.min(maxSliceHeightPx, imgH - yOffset)
+
+        if (alertBand) {
+          const alertTop = alertBand.topPx
+          const alertBottom = alertBand.bottomPx
+          const sliceTop = yOffset
+          const sliceBottom = yOffset + sliceHeightPx
+
+          if (
+            sliceTop < alertTop &&
+            sliceBottom > alertTop &&
+            sliceBottom < alertBottom
+          ) {
+            const safeHeight = Math.max(Math.floor(alertTop - sliceTop - 6), 80)
+            sliceHeightPx = safeHeight
+          }
+        }
+
+        const canvas = document.createElement('canvas')
+        canvas.width = imgW
+        canvas.height = sliceHeightPx
+
+        const ctx = canvas.getContext('2d')
+        ctx.imageSmoothingEnabled = true
+
+        ctx.drawImage(
+          img,
+          0,
+          yOffset,
+          imgW,
+          sliceHeightPx,
+          0,
+          0,
+          imgW,
+          sliceHeightPx
+        )
+
+        const sliceDataUrl = canvas.toDataURL('image/png')
+
+        if (pageIndex > 0) {
+          pdf.addPage()
+        }
+
+        const renderH = sliceHeightPx * scale
+
+        pdf.addImage(
+          sliceDataUrl,
+          'PNG',
+          margin,
+          margin,
+          maxW,
+          renderH
+        )
+
+        yOffset += sliceHeightPx
+        pageIndex += 1
+      }
+
+      pdf.save(exportFilename('pdf'))
+      showSnackbar('Exported PDF successfully.')
+      return true
+    })
+
+    if (!result) return
+  } catch (err) {
+    console.error('PDF export failed', err)
+    showSnackbar('PDF export failed. Please try again.', 'error')
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -687,105 +925,200 @@ onMounted(fetchHistory)
             </div>
           </div>
 
+          <!-- Card with inner plain DIV as capture target -->
           <v-card class="detail-card">
-            <v-card-text>
-              <!-- Personal & Lab Details (mirrors ResultPage) -->
-              <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
-                <v-row dense>
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Patient Name</div>
-                    <div class="meta-value">{{ patientName || 'Not set in profile' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Age</div>
-                    <div class="meta-value">{{ selectedItem.test_age ?? '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Sex</div>
-                    <div class="meta-value">{{ sexLabel(selectedItem.test_sex) }}</div>
-                  </v-col>
-
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Laboratory Name</div>
-                    <div class="meta-value">{{ selectedItem.test_lab_name || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Laboratory Location</div>
-                    <div class="meta-value">{{ labLocation || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Test Date</div>
-                    <div class="meta-value">{{ displayTestDate || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="6" md="2">
-                    <div class="meta-label">Country</div>
-                    <div class="meta-value">{{ selectedItem.test_lab_country || '—' }}</div>
-                  </v-col>
-
-                  <v-col cols="12" md="4">
-                    <div class="meta-label">Saved</div>
-                    <div class="meta-value">{{ formattedDate(selectedItem.created_at) }}</div>
-                  </v-col>
-                </v-row>
-              </v-sheet>
-
-              <!-- Status Overview -->
-              <v-sheet v-if="hasCBCSummary" class="cbc-summary-sheet mt-4" rounded="xl" variant="outlined">
-                <div class="cbc-summary-header d-flex align-center gap-2 mb-2">
-                  <v-icon size="18" class="me-2">mdi-clipboard-pulse-outline</v-icon>
-                  <h3>Status Overview</h3>
+            <!-- Only this area is captured -->
+            <div ref="detailCardRef" class="capture-root">
+              <v-card-text>
+                <div class="mb-3 d-flex align-center">
+                  <span class="section-emoji">🏥</span>
+                  <h3 class="text-subtitle-1 font-weight-bold">
+                    Overview of Your CBC Findings
+                  </h3>
                 </div>
 
-                <v-row dense>
-                  <v-col
-                    v-for="item in selectedSummaryItems"
-                    :key="item.key"
-                    cols="12" sm="6" md="4" lg="3" class="mb-1"
+                <!-- TOP SECTION: Personal details + Status Overview -->
+                <div class="top-section">
+                  <!-- Personal & Lab Details -->
+                  <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
+                    <v-row dense>
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Patient Name</div>
+                        <div class="meta-value">{{ patientName || 'Not set in profile' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Age</div>
+                        <div class="meta-value">{{ selectedItem.test_age ?? '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Sex</div>
+                        <div class="meta-value">{{ sexLabel(selectedItem.test_sex) }}</div>
+                      </v-col>
+
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Laboratory Name</div>
+                        <div class="meta-value">{{ selectedItem.test_lab_name || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Laboratory Location</div>
+                        <div class="meta-value">{{ labLocation || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Test Date</div>
+                        <div class="meta-value">{{ displayTestDate || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="6" md="2">
+                        <div class="meta-label">Country</div>
+                        <div class="meta-value">{{ selectedItem.test_lab_country || '—' }}</div>
+                      </v-col>
+
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">Saved</div>
+                        <div class="meta-value">{{ formattedDate(selectedItem.created_at) }}</div>
+                      </v-col>
+                    </v-row>
+                  </v-sheet>
+
+                  <!-- Status Overview -->
+                  <v-sheet
+                    v-if="hasCBCSummary"
+                    class="cbc-summary-sheet"
+                    rounded="xl"
+                    variant="outlined"
                   >
-                    <div class="cbc-item">
-                      <div class="cbc-label">{{ item.label }}</div>
-                      <div class="cbc-value-line">
-                        <span class="cbc-value">{{ fmtVal(item) }}</span>
-                        <v-chip
-                          v-if="item.status && item.status !== '—'"
-                          :color="chipColor(item.status)"
-                          size="x-small"
-                          variant="elevated"
-                          class="status-chip text-uppercase font-weight-bold"
-                        >
-                          {{ item.status }}
-                        </v-chip>
-                      </div>
-                      <div class="cbc-ref">Ref: {{ formatRef(item) }}</div>
+                    <div class="cbc-summary-header d-flex align-center gap-2 mb-2">
+                      <span class="section-emoji small">📋</span>
+                      <h3>Status Overview</h3>
                     </div>
-                  </v-col>
-                </v-row>
-              </v-sheet>
 
-              <!-- Interpretation -->
-              <div class="mt-6 ai-section">
-                <div class="ai-header d-flex align-center gap-2 mb-2">
-                  <v-icon color="#b70d37" class="me-2">mdi-robot-outline</v-icon>
-                  <span class="ai-title">AI-Assisted Explanation</span>
+                    <v-row dense>
+                      <v-col
+                        v-for="item in selectedSummaryItems"
+                        :key="item.key"
+                        cols="12"
+                        sm="6"
+                        md="6"
+                        lg="6"
+                        class="mb-1"
+                      >
+                        <div class="cbc-item">
+                          <div class="cbc-label">{{ item.label }}</div>
+                          <div class="cbc-value-line">
+                            <span class="cbc-value">{{ fmtVal(item) }}</span>
+                            <v-chip
+                              v-if="item.status && item.status !== '—'"
+                              :color="chipColor(item.status)"
+                              size="x-small"
+                              variant="elevated"
+                              class="status-chip text-uppercase font-weight-bold"
+                            >
+                              {{ item.status }}
+                            </v-chip>
+                          </div>
+                          <div class="cbc-ref">Ref: {{ formatRef(item) }}</div>
+                        </div>
+                      </v-col>
+                    </v-row>
+                  </v-sheet>
                 </div>
 
-                <v-alert type="warning" variant="tonal" density="comfortable" class="mb-4">
-                  This explanation is for educational support only and must not replace assessment by a
-                  licensed physician. If you feel unwell or your results are significantly abnormal, please
-                  consult your doctor.
-                </v-alert>
+                <!-- Interpretation -->
+                <div class="mt-6 ai-section">
+                  <div class="ai-header d-flex align-center gap-2 mb-2">
+                    <span class="section-emoji">🤖</span>
+                    <span class="ai-title">AI-Assisted Explanation</span>
+                  </div>
 
-                <div v-if="selectedHtml" class="detail-markdown" v-html="selectedHtml"></div>
-                <div v-else class="text-grey-darken-1 text-body-2">
-                  No interpretation found for this entry.
+                  <div class="ai-model-line mb-2">
+                    <span class="ai-model-label me-2">Model used</span>
+                    <span class="ai-model-value">
+                      {{ providerLabel(selectedItem.provider) }}
+                      <span v-if="selectedItem.model"> ({{ selectedItem.model }})</span>
+                    </span>
+                  </div>
+
+                  <v-alert
+                    type="warning"
+                    variant="tonal"
+                    density="comfortable"
+                    class="mb-4 educational-alert"
+                    border="start"
+                  >
+                    <template #prepend>
+                      <span class="educational-alert-emoji">⚠️</span>
+                    </template>
+
+                    <span class="educational-alert-text">
+                      This explanation is for educational support only and must not replace assessment
+                      by a licensed physician. If you feel unwell or your results are significantly
+                      abnormal, please consult your doctor.
+                    </span>
+                  </v-alert>
+
+                  <div v-if="selectedHtml" class="detail-markdown" v-html="selectedHtml"></div>
+                  <div v-else class="text-grey-darken-1 text-body-2">
+                    No interpretation found for this entry.
+                  </div>
                 </div>
-              </div>
-            </v-card-text>
+
+                <!-- HemaSense footer INSIDE capture area (shows on image/PDF) -->
+                <div class="export-footer">
+                  <img
+                    src="/images/logo-favicon.png"
+                    alt="HemaSense logo"
+                    class="export-footer-logo"
+                  />
+                  <span class="export-footer-text">
+                    © 2025 HemaSense · All rights reserved
+                  </span>
+                </div>
+              </v-card-text>
+            </div>
+
+            <!-- Export dropdown (excluded from capture) -->
+            <div class="export-actions d-flex align-center justify-end px-4 pb-4 ga-2">
+              <v-menu location="bottom end" transition="fade-transition">
+                <template #activator="{ props }">
+                  <v-btn
+                    v-bind="props"
+                    size="small"
+                    color="primary"
+                    variant="flat"
+                    prepend-icon="mdi-tray-arrow-down"
+                    :loading="exporting"
+                    :disabled="exporting"
+                  >
+                    Export
+                    <v-icon end class="ms-1">mdi-chevron-down</v-icon>
+                  </v-btn>
+                </template>
+
+                <v-list density="compact" min-width="180">
+                  <v-list-item @click="exportAsImage">
+                    <template #prepend>
+                      <v-icon>mdi-image-outline</v-icon>
+                    </template>
+                    <v-list-item-title>Image</v-list-item-title>
+                    <v-list-item-subtitle>PNG export</v-list-item-subtitle>
+                  </v-list-item>
+
+                  <v-divider class="my-1" />
+
+                  <v-list-item @click="exportAsPdf">
+                    <template #prepend>
+                      <v-icon>mdi-file-pdf-box</v-icon>
+                    </template>
+                    <v-list-item-title>PDF</v-list-item-title>
+                    <v-list-item-subtitle>For printing & sharing</v-list-item-subtitle>
+                  </v-list-item>
+                </v-list>
+              </v-menu>
+            </div>
           </v-card>
         </div>
 
@@ -912,8 +1245,50 @@ onMounted(fetchHistory)
 .detail-card { border-radius: 24px; border: 2px solid #0D47A1; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); padding: 2px; }
 .detail-card :deep(.v-card-text) { padding: 18px 18px 20px; }
 
+/* Capture root export layout */
+.capture-root.export-layout {
+  width: 780px;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+/* During export, remove transitions/animations on the clone for stable rendering */
+.capture-root.export-layout,
+.capture-root.export-layout * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Extra clean look for offscreen export clone */
+.export-clone {
+  box-shadow: none !important;
+}
+
+/* Emoji section icons */
+.section-emoji {
+  margin-right: 6px;
+  font-size: 1.1rem;
+}
+.section-emoji.small {
+  font-size: 0.9rem;
+}
+
+/* TOP SECTION layout */
+.top-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* For export: keep them stacked (Personal Info full width, then Status Overview) */
+.capture-root.export-layout .top-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 /* Meta section */
-.meta-sheet { padding: 10px 20px; border: 2px solid #0d47a1; }
+.meta-sheet { padding: 10px 20px; border: 2px solid #b3bbc9; }
 .meta-label {
   font-size: 0.7rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.06em;
 }
@@ -929,6 +1304,16 @@ onMounted(fetchHistory)
 .cbc-ref { font-size: 0.68rem; }
 .status-chip { font-size: 0.6rem; }
 
+/* Force 2 columns for Status Overview items ONLY on export clone */
+.capture-root.export-layout .cbc-summary-sheet :deep(.v-row) {
+  margin-left: 0;
+  margin-right: 0;
+}
+.capture-root.export-layout .cbc-summary-sheet :deep(.v-col) {
+  flex: 0 0 50% !important;
+  max-width: 50% !important;
+}
+
 /* AI Section */
 .ai-section { margin-top: 18px; }
 .ai-header .ai-title { font-weight: 600; font-size: 0.98rem; }
@@ -939,9 +1324,62 @@ onMounted(fetchHistory)
 .detail-markdown h2, .detail-markdown h3 {
   margin-top: 0.65rem; margin-bottom: 0.2rem; font-size: 0.96rem; font-weight: 600;
 }
-.detail-markdown ul, .detail-markdown ol { padding-left: 1.4rem; margin: 0.3rem 0 0.55rem; }
+.detail-markdown ul, .detail-markdown ol {
+  padding-left: 1.4rem;
+  margin: 0.3rem 0 0.55rem;
+}
 .detail-markdown li { margin: 0.14rem 0; }
 .detail-markdown strong { font-weight: 600; }
+
+/* Tighter bullets + text only on export clone to avoid big blank spaces */
+.capture-root.export-layout .detail-markdown {
+  line-height: 1.45;
+}
+.capture-root.export-layout .detail-markdown ul,
+.capture-root.export-layout .detail-markdown ol {
+  margin: 0.08rem 0 0.18rem;
+}
+.capture-root.export-layout .detail-markdown li {
+  margin: 0.03rem 0;
+}
+.capture-root.export-layout .detail-markdown li p {
+  margin-top: 0.02rem;
+  margin-bottom: 0.02rem;
+}
+.capture-root.export-layout .detail-markdown p {
+  margin-top: 0.12rem;
+  margin-bottom: 0.12rem;
+}
+
+/* Warning banner text */
+.educational-alert-emoji {
+  margin-right: 6px;
+}
+.educational-alert-text {
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+/* HemaSense footer inside capture area */
+.export-footer {
+  margin-top: 24px;
+  padding-top: 10px;
+  border-top: 1px dashed #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  opacity: 0.85;
+}
+.export-footer-logo {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+.export-footer-text {
+  font-size: 0.7rem;
+  color: #6b7280;
+}
 
 /* transitions + misc */
 .history-list-move { transition: transform 0.2s ease, opacity 0.2s ease; }
@@ -950,6 +1388,7 @@ onMounted(fetchHistory)
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
+/* Bulk-delete FAB */
 .delete-fab {
   position: fixed !important; right: 18px !important; bottom: 110px !important;
   width: 52px; height: 52px; border-radius: 999px; min-width: 0; padding: 0;
@@ -967,4 +1406,10 @@ onMounted(fetchHistory)
 }
 
 .cancel-select-btn { color: #b70d37 !important; font-weight: 600; }
+
+/* Export bar styles */
+.export-actions :deep(.v-btn) {
+  text-transform: none;
+  font-weight: 600;
+}
 </style>
