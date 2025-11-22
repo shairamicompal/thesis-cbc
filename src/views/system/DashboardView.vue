@@ -3,7 +3,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import SideNavi from '@/components/layout/navigation/SideNavi.vue'
 import BottomNavi from '@/components/layout/navigation/BottomNavi.vue'
 
-// Import the two destination views
+// Import the two destination views (not needed in router.push, but fine if used elsewhere)
 import InterpreterView from '@/views/system/InterpreterView.vue'
 import HistoryView from '@/views/system/HistoryView.vue'
 
@@ -72,21 +72,21 @@ const greetingLine = computed(() => {
     : `Welcome, ${firstName.value} 👋`
 })
 
-const subtextLine = computed(() => 'Ready to interpret your latest CBC result?')
+const subtextLine = computed(
+  () => 'Ready to interpret your latest CBC result?'
+)
 
 /* -------- Navigation -------- */
 const goToAnalysis = () => {
-  router.push({
-    path: '/interpreter',
-    component: InterpreterView
-  })
+  router.push({ path: '/interpreter' })
 }
 
 const goToHistory = () => {
-  router.push({
-    path: '/history',
-    component: HistoryView
-  })
+  router.push({ path: '/history' })
+}
+
+const goToSupport = () => {
+  router.push({ path: '/support' })
 }
 </script>
 
@@ -126,50 +126,72 @@ const goToHistory = () => {
             color="#b70d37"
             rounded="pill"
             size="large"
-            prepend-icon="mdi mdi-water-plus"
+            prepend-icon="mdi-water-plus"
             class="start-btn"
             @click="goToAnalysis"
           >
             START ANALYSIS
           </v-btn>
+          <div class="mt-2 text-xxs text-medium-emphasis">
+            Start by entering a new CBC result for interpretation.
+          </div>
         </v-card>
 
         <!-- Quick Actions -->
         <v-row class="mt-6" justify="center" align="stretch" dense>
           <v-col cols="6" sm="4">
             <v-card
-              class="pa-3 text-center rounded-lg home-mini-card"
+              class="pa-3 text-center rounded-lg home-mini-card history-card"
               variant="outlined"
               @click="goToHistory"
             >
-              <v-icon size="22" class="mb-1" color="#1b365d">
+              <div class="mini-card-bar" />
+              <v-icon size="22" class="mb-1 mt-1" color="#1b365d">
                 mdi-history
               </v-icon>
-              <div class="text-caption font-weight-medium">View History</div>
+              <div class="text-caption font-weight-medium">
+                View History
+              </div>
               <div class="text-xxs text-medium-emphasis mt-1">
-                All your saved interpreted CBC result.
+                See all CBC interpretations you saved.
               </div>
             </v-card>
           </v-col>
 
           <v-col cols="6" sm="4">
-            <v-card class="pa-3 text-center rounded-lg home-mini-card" variant="outlined">
-              <v-icon size="22" class="mb-1" color="#1b365d">
+            <v-card
+              class="pa-3 text-center rounded-lg home-mini-card support-card"
+              variant="outlined"
+              @click="goToSupport"
+            >
+              <div class="mini-card-bar mini-card-bar-blue" />
+              <v-icon size="22" class="mb-1 mt-1" color="#1b365d">
                 mdi-lightbulb-on-outline
               </v-icon>
-              <div class="text-caption font-weight-medium">How It Works</div>
+              <div class="text-caption font-weight-medium d-flex align-center justify-center">
+                How It Works
+                <v-icon size="16" class="ms-1">
+                  mdi-arrow-right
+                </v-icon>
+              </div>
               <div class="text-xxs text-medium-emphasis mt-1">
-                Short guide to reading your results.
+                Open the quick start guide and CBC glossary.
               </div>
             </v-card>
           </v-col>
 
           <v-col cols="12" sm="4">
-            <v-card class="pa-3 text-center rounded-lg home-mini-card" variant="outlined">
-              <v-icon size="22" class="mb-1" color="#1b365d">
+            <v-card
+              class="pa-3 text-center rounded-lg home-mini-card secure-card"
+              variant="outlined"
+            >
+              <div class="mini-card-bar mini-card-bar-green" />
+              <v-icon size="22" class="mb-1 mt-1" color="#1b365d">
                 mdi-shield-check-outline
               </v-icon>
-              <div class="text-caption font-weight-medium">Secure & Private</div>
+              <div class="text-caption font-weight-medium">
+                Secure &amp; Private
+              </div>
               <div class="text-xxs text-medium-emphasis mt-1">
                 Your CBC data stays encrypted and confidential.
               </div>
@@ -206,7 +228,7 @@ const goToHistory = () => {
 
 /* ---- Primary action area ---- */
 .home-primary-card {
-  padding: 24px 0;
+  padding: 24px 0 8px;
   background: transparent !important;
   box-shadow: none !important;
   border: none !important;
@@ -223,12 +245,36 @@ const goToHistory = () => {
 /* ---- Mini cards ---- */
 .home-mini-card {
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease,
+    border-color 0.18s ease, background-color 0.18s ease;
   border-radius: 18px;
+  position: relative;
+  overflow: hidden;
 }
+
+/* subtle colored top bar */
+.mini-card-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #b70d37;
+}
+
+.mini-card-bar-blue {
+  background: #1b365d;
+}
+
+.mini-card-bar-green {
+  background: #0f766e;
+}
+
 .home-mini-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+  border-color: rgba(27, 54, 93, 0.5);
+  background-color: rgba(148, 163, 184, 0.06);
 }
 
 .text-xxs {
