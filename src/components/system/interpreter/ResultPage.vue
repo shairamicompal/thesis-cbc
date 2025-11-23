@@ -20,6 +20,9 @@ const props = defineProps({
   labCountry: { type: String, default: '' },
   testDate: { type: String, default: '' },
 
+  // pentra | abbott (passed from Interpret.vue / HistoryView)
+  machine: { type: String, default: '' },
+
   saveSuccess: { type: String, default: '' },
   saveError: { type: String, default: '' },
 
@@ -61,6 +64,21 @@ const providerLabel = computed(() => {
   return props.provider || 'AI Interpreter'
 })
 
+/* --------- Analyzer label (Pentra vs Abbott) --------- */
+const machineLabel = computed(() => {
+  const raw = (props.machine || '').toString().toLowerCase().trim()
+  if (!raw) return ''
+
+  if (raw === 'pentra' || raw.includes('pentra')) {
+    return 'Pentra CBC Analyzer'
+  }
+  if (raw === 'abbott' || raw.includes('abbott')) {
+    return 'Abbott CELL-DYN Ruby'
+  }
+  // fallback (if some custom label was stored in DB)
+  return props.machine
+})
+
 /* --------- Meta info --------- */
 const labLocation = computed(() => {
   const parts = [props.labCity, props.labCountry].filter(Boolean)
@@ -74,7 +92,23 @@ const displayTestDate = computed(() => {
     : props.testDate
 })
 
-const hasCBCSummary = computed(() => (props.summaryItems || []).length > 0)
+/* --------- Filtered CBC summary (hide non-Abbott fields) --------- */
+const filteredSummaryItems = computed(() => {
+  const machine = (props.machine || '').toString().toLowerCase()
+  // Only hide fields when machine is Abbott
+  if (machine !== 'abbott') {
+    return props.summaryItems || []
+  }
+
+  const skip = new Set(['rbc', 'mcv', 'mch', 'mchc'])
+  return (props.summaryItems || []).filter(
+    (item) => !skip.has(item.key),
+  )
+})
+
+const hasCBCSummary = computed(
+  () => (filteredSummaryItems.value || []).length > 0,
+)
 
 /* --------- Helper: ref formatting for differentials --------- */
 const isDiffKey = (k) =>
@@ -152,6 +186,14 @@ const formatRef = (item) => {
             <div class="meta-value">{{ labName || '—' }}</div>
           </v-col>
 
+          <!-- Analyzer / Machine -->
+          <v-col cols="12" md="4">
+            <div class="meta-label">CBC Machine / Analyzer</div>
+            <div class="meta-value">
+              {{ machineLabel || '—' }}
+            </div>
+          </v-col>
+
           <v-col cols="12" md="4">
             <div class="meta-label">Laboratory Location</div>
             <div class="meta-value">{{ labLocation || '—' }}</div>
@@ -179,15 +221,15 @@ const formatRef = (item) => {
         <div
           class="cbc-summary-header d-flex align-center gap-2 mb-2"
         >
-          <v-icon size="18" class="me-2"
-            >mdi-clipboard-pulse-outline</v-icon
-          >
+          <v-icon size="18" class="me-2">
+            mdi-clipboard-pulse-outline
+          </v-icon>
           <h3>Status Overview</h3>
         </div>
 
         <v-row dense>
           <v-col
-            v-for="item in summaryItems"
+            v-for="item in filteredSummaryItems"
             :key="item.key"
             cols="12"
             sm="6"
@@ -229,9 +271,9 @@ const formatRef = (item) => {
       <!-- AI Interpretation -->
       <div class="mt-6 ai-section">
         <div class="ai-header d-flex align-center gap-2 mb-2">
-          <v-icon color="#b70d37" class="me-2"
-            >mdi-robot-outline</v-icon
-          >
+          <v-icon color="#b70d37" class="me-2">
+            mdi-robot-outline
+          </v-icon>
           <span class="ai-title">AI-Assisted Explanation</span>
         </div>
 
