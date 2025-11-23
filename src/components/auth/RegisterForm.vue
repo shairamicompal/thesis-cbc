@@ -10,9 +10,9 @@ import {
   confirmedValidator,
 } from '@/utils/validators'
 
-// Prefer env; fallback to localhost for dev
-// In Vite, set VITE_API_BASE=http://localhost:8000/api (frontend .env)
-const API_BASE = import.meta?.env?.VITE_API_BASE || 'http://localhost:8000/api'
+// Use backend base URL from env; if not set, default to same-origin.
+// Example prod env: VITE_API_BASE="https://thesis-hjyo5qhqt-shaira-micompals-projects.vercel.app"
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 
 const router = useRouter()
 
@@ -37,28 +37,36 @@ const formActionDefault = {
 const formAction = ref({ ...formActionDefault })
 
 // Safely parse JSON (prevents "<!DOCTYPE" crash on HTML error pages)
-const safeJson = async (res) => {
+const safeJson = async res => {
   const text = await res.text()
-  try { return JSON.parse(text) } catch { return { raw: text } }
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { raw: text }
+  }
 }
 
 // Rules as functions so they react to latest values
 const firstNameRules = [requiredValidator]
-const lastNameRules  = [requiredValidator]
-const emailRules     = [requiredValidator, emailValidator]
-const passwordRules  = [requiredValidator, passwordValidator]
+const lastNameRules = [requiredValidator]
+const emailRules = [requiredValidator, emailValidator]
+const passwordRules = [requiredValidator, passwordValidator]
 const confirmPasswordRules = [
   requiredValidator,
-  (val) => confirmedValidator(val, formData.value.password),
+  val => confirmedValidator(val, formData.value.password),
   // Or basic version:
   // (val) => val === formData.value.password || 'Passwords do not match',
 ]
 
 // Clear banners when user edits
-watch(formData, () => {
-  formAction.value.formErrorMessage = ''
-  formAction.value.formSuccessMessage = ''
-}, { deep: true })
+watch(
+  formData,
+  () => {
+    formAction.value.formErrorMessage = ''
+    formAction.value.formSuccessMessage = ''
+  },
+  { deep: true },
+)
 
 const onSubmit = async () => {
   if (formAction.value.formProcess) return
@@ -70,37 +78,42 @@ const onSubmit = async () => {
       password: formData.value.password,
       profile: {
         firstname: formData.value.firstname.trim(),
-        lastname:  formData.value.lastname.trim(),
+        lastname: formData.value.lastname.trim(),
       },
     }
 
-    // 1) Create user (server, using service role)
-    const response = await fetch(`${API_BASE}/auth/signup`, {
+    // 1) Create user via backend (service role on server)
+    const response = await fetch(`${API_BASE}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
+
     const result = await safeJson(response)
     console.log('Signup response:', response.status, result)
 
     if (!response.ok) {
       formAction.value.formStatus = response.status
-      const looksLikeHtml = typeof result?.raw === 'string' && result.raw.startsWith('<')
-      formAction.value.formErrorMessage =
-        result?.error
-          ? result.error
-          : looksLikeHtml
-            ? 'Server returned HTML (proxy/middleware issue). Use absolute URL or fix proxy.'
-            : 'Signup failed. Please try again.'
+      const looksLikeHtml =
+        typeof result?.raw === 'string' && result.raw.startsWith('<')
+
+      formAction.value.formErrorMessage = result?.error
+        ? result.error
+        : looksLikeHtml
+          ? 'Server returned HTML (proxy or deployment issue).'
+          : 'Signup failed. Please try again.'
       return
     }
 
-    // 2) Auto-login (client)
-    formAction.value.formSuccessMessage = 'Registration successful — signing you in...'
+    // 2) Auto-login (client-side via Supabase)
+    formAction.value.formSuccessMessage =
+      'Registration successful — signing you in...'
+
     const { error: loginErr } = await supabase.auth.signInWithPassword({
       email: payload.email,
       password: payload.password,
     })
+
     if (loginErr) {
       formAction.value.formErrorMessage = `Account created but sign-in failed: ${loginErr.message}`
       formAction.value.formStatus = loginErr.status ?? 400
@@ -116,13 +129,13 @@ const onSubmit = async () => {
   } catch (err) {
     formAction.value.formStatus = 0
     formAction.value.formErrorMessage =
-      err?.message || 'Network error. Make sure the server is running on :8000.'
+      err?.message || 'Network error. Please check your connection and try again.'
   } finally {
     formAction.value.formProcess = false
   }
 }
 
-const onFormSubmit = async (e) => {
+const onFormSubmit = async e => {
   e.preventDefault()
   const { valid } = await refVForm.value?.validate()
   if (valid) onSubmit()
@@ -210,5 +223,7 @@ const onFormSubmit = async (e) => {
 </template>
 
 <style scoped>
-.v-text-field :deep(input)::placeholder{ opacity:.8 }
+.v-text-field :deep(input)::placeholder {
+  opacity: 0.8;
+}
 </style>
