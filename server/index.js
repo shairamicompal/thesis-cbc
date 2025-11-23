@@ -1,6 +1,5 @@
 // server/index.js
 import express from "express";
-import cors from "cors";
 import morgan from "morgan";
 import { createClient } from "@supabase/supabase-js";
 import Groq from "groq-sdk";
@@ -10,16 +9,32 @@ import "dotenv/config";
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-/* ---------------- CORS (fix for Vercel + frontend) ---------------- */
-app.use(
-  cors({
-    origin: "*", // allow all origins (localhost, mobile app, deployed frontend)
-    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-app.options("*", cors());
-/* ------------------------------------------------------------------ */
+/* ---------------- Global CORS (frontend + mobile + localhost) ---------------- */
+// Manually set CORS headers for every request, including preflight
+app.use((req, res, next) => {
+  // Allow any origin (you can restrict later if needed)
+  res.header("Access-Control-Allow-Origin", "*");
+
+  // Allowed HTTP methods
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS"
+  );
+
+  // Allowed headers
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
+
+  // Handle preflight requests quickly
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+
+  next();
+});
+/* ----------------------------------------------------------------------------- */
 
 app.use(express.json());
 app.use(morgan("dev"));
@@ -55,10 +70,11 @@ app.get("/", (_req, res) => {
 });
 /* ---------------------------------------------- */
 
-/* ---------------- Auth route (optional) ---------------- */
+/* ---------------- Auth route ---------------- */
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { email, password, profile } = req.body ?? {};
+
     if (!email || !password) {
       return res.status(400).json({ error: "email and password are required" });
     }
@@ -86,6 +102,7 @@ app.post("/api/auth/signup", async (req, res) => {
 app.post("/api/ask", async (req, res) => {
   try {
     const { provider, model, prompt } = req.body ?? {};
+
     if (!provider || !model || !prompt) {
       return res
         .status(400)
@@ -94,7 +111,9 @@ app.post("/api/ask", async (req, res) => {
 
     if (provider === "groq") {
       if (!GROQ_API_KEY) {
-        return res.status(500).json({ error: "GROQ_API_KEY is not set on server" });
+        return res
+          .status(500)
+          .json({ error: "GROQ_API_KEY is not set on server" });
       }
 
       const groq = getGroq();
@@ -103,7 +122,8 @@ app.post("/api/ask", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "You are a careful hematology explainer. Be accurate and concise.",
+            content:
+              "You are a careful hematology explainer. Be accurate and concise.",
           },
           { role: "user", content: prompt },
         ],
@@ -113,13 +133,17 @@ app.post("/api/ask", async (req, res) => {
         frequency_penalty: 0,
       });
 
-      const text = resp?.choices?.[0]?.message?.content?.trim() || "(No content returned)";
+      const text =
+        resp?.choices?.[0]?.message?.content?.trim() ||
+        "(No content returned)";
       return res.json({ text: stripThink(text) });
     }
 
     if (provider === "openai") {
       if (!OPENAI_API_KEY) {
-        return res.status(500).json({ error: "OPENAI_API_KEY is not set on server" });
+        return res
+          .status(500)
+          .json({ error: "OPENAI_API_KEY is not set on server" });
       }
 
       const openai = getOpenAI();
@@ -128,7 +152,8 @@ app.post("/api/ask", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "You are a careful hematology explainer. Be accurate and concise.",
+            content:
+              "You are a careful hematology explainer. Be accurate and concise.",
           },
           { role: "user", content: prompt },
         ],
@@ -138,11 +163,15 @@ app.post("/api/ask", async (req, res) => {
         frequency_penalty: 0,
       });
 
-      const text = resp?.choices?.[0]?.message?.content?.trim() || "(No content returned)";
+      const text =
+        resp?.choices?.[0]?.message?.content?.trim() ||
+        "(No content returned)";
       return res.json({ text: stripThink(text) });
     }
 
-    return res.status(400).json({ error: "Unknown provider (use 'groq' or 'openai')" });
+    return res
+      .status(400)
+      .json({ error: "Unknown provider (use 'groq' or 'openai')" });
   } catch (err) {
     console.error("❌ /api/ask error:", err?.response?.data || err);
     const msg =
