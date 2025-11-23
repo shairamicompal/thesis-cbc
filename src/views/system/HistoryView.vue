@@ -569,13 +569,50 @@ function exportFilename(ext = 'png') {
   return `CBC_${prov}_${who}_${date}.${ext}`.replace(/_+/g, '_')
 }
 
+/**
+ * UPDATED: handle desktop vs mobile differently.
+ * - Desktop: trigger a download.
+ * - Mobile / WebView: open image in a new tab for preview + long-press save.
+ */
 function downloadDataUrl(dataUrl, filename) {
-  const a = document.createElement('a')
-  a.href = dataUrl
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
+  const ua = navigator.userAgent || ''
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(ua)
+
+  if (isMobile) {
+    // Open a simple preview page with the PNG
+    const win = window.open('', '_blank')
+    if (win) {
+      win.document.title = filename
+      win.document.body.style.margin = '0'
+      win.document.body.style.background = '#000'
+
+      const img = win.document.createElement('img')
+      img.src = dataUrl
+      img.style.maxWidth = '100%'
+      img.style.height = 'auto'
+      img.style.display = 'block'
+      img.style.margin = '0 auto'
+      img.style.background = '#000'
+
+      win.document.body.appendChild(img)
+    } else {
+      // Fallback: just try the classic download pattern
+      const a = document.createElement('a')
+      a.href = dataUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    }
+  } else {
+    // Desktop browsers handle download attribute well
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
 }
 
 async function getCaptureEl() {
