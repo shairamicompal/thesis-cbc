@@ -1,41 +1,16 @@
-// import { fileURLToPath, URL } from "node:url";
-// import { defineConfig } from "vite";
-// import vue from "@vitejs/plugin-vue";
-// import vueDevTools from "vite-plugin-vue-devtools";
-
-// export default defineConfig({
-//   plugins: [vue(), vueDevTools()],
-//   resolve: {
-//     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-//   },
-//   server: {
-//     proxy: {
-//       "/api": {
-//         target: "http://localhost:8000", // your Express server
-//         changeOrigin: true,
-//       },
-//     },
-//   },
-// });
-
-import { fileURLToPath, URL } from "node:url"
-import { defineConfig } from "vite"
-import vue from "@vitejs/plugin-vue"
-import vueDevTools from "vite-plugin-vue-devtools"
+// vite.config.js
+import { fileURLToPath, URL } from "node:url";
+import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
+import vueDevTools from "vite-plugin-vue-devtools";
 
 export default defineConfig({
   plugins: [vue(), vueDevTools()],
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-  },
-  server: {
-    proxy: {
-      "/api": {
-        target: "http://localhost:8000", // Express backend
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path, // important — keep path as-is
-      },
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
-})
+  // No `server.proxy` here.
+  // All API calls should go through import.meta.env.VITE_API_BASE
+});
