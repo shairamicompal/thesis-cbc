@@ -44,7 +44,7 @@ const snackbarMessage = ref('')
 const snackbarColor = ref('success')
 
 /* ====== Export refs/state ====== */
-const detailCardRef = ref(null)   // capture root
+const detailCardRef = ref(null) // capture root
 const exporting = ref(false)
 
 /* ---------- tiny helpers ---------- */
@@ -91,6 +91,30 @@ function preview(md, length = 90) {
   return text.length > length ? text.slice(0, length) + '…' : text
 }
 
+/* ---------- Analyzer helpers ---------- */
+
+function analyzerInfo(row) {
+  const rawSource =
+    row?.test_analyzer ??
+    row?.analyzer ??
+    ''
+
+  const raw = rawSource.toString().toLowerCase().trim()
+
+  const isAbbott =
+    raw === 'abbott' || raw.includes('abbott')
+
+  const isPentra =
+    raw === 'pentra' || raw.includes('pentra')
+
+  let label = ''
+  if (isPentra) label = 'Pentra CBC Analyzer'
+  else if (isAbbott) label = 'Abbott CELL-DYN Ruby'
+  else label = rawSource || ''
+
+  return { isAbbott, isPentra, label, raw }
+}
+
 /* ---------- RANGES & SUMMARY ---------- */
 const ranges = {
   wbc:   { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
@@ -111,19 +135,27 @@ const ranges = {
   baso:  { low: 0.00, high: 0.01, unit: '',      label: 'Basophils' },
 }
 
-const isDiffKey = (k) => ['neut', 'lymph', 'mono', 'eos', 'baso'].includes(k)
-const parseNum = (v) => (v === '' || v == null ? NaN : Number(v))
+const isDiffKey = (k) =>
+  ['neut', 'lymph', 'mono', 'eos', 'baso'].includes(k)
+
+const parseNum = (v) =>
+  v === '' || v == null ? NaN : Number(v)
+
 const getStatus = (val, low, high) => {
   if (!isFinite(val)) return '—'
   if (val < low) return 'Low'
   if (val > high) return 'High'
   return 'Normal'
 }
+
 const chipColor = (status) =>
-  status === 'Low' ? 'error'
-  : status === 'High' ? 'warning'
-  : status === 'Normal' ? 'success'
-  : undefined
+  status === 'Low'
+    ? 'error'
+    : status === 'High'
+      ? 'warning'
+      : status === 'Normal'
+        ? 'success'
+        : undefined
 
 const fmtVal = (item) => {
   if (!isFinite(item.value)) return '—'
@@ -145,104 +177,152 @@ function formatRef(item) {
   return `${low}–${high} ${unit}`.trim()
 }
 
-/* Build CBC summary items from a history row */
+/* Build CBC summary items from a history row (machine-aware) */
 const selectedSummaryItems = computed(() => {
   const row = selectedItem.value
   if (!row) return []
-  const s = row.test_sex === 'M' ? 'M' : 'F'
 
-  const pack = [
-    {
-      key: 'wbc',
-      ...ranges.wbc,
-      value: parseNum(row.wbc),
-      status: getStatus(parseNum(row.wbc), ranges.wbc.low, ranges.wbc.high),
-    },
-    {
+  const s = row.test_sex === 'M' ? 'M' : 'F'
+  const { isAbbott } = analyzerInfo(row)
+
+  const pack = []
+
+  // WBC – always
+  pack.push({
+    key: 'wbc',
+    ...ranges.wbc,
+    value: parseNum(row.wbc),
+    status: getStatus(parseNum(row.wbc), ranges.wbc.low, ranges.wbc.high),
+  })
+
+  // RBC – only if NOT Abbott (Pentra / generic)
+  if (!isAbbott) {
+    const rbcRange = s === 'M' ? ranges.rbcM : ranges.rbcF
+    pack.push({
       key: 'rbc',
-      ...(s === 'M' ? ranges.rbcM : ranges.rbcF),
+      ...rbcRange,
       value: parseNum(row.rbc),
-      status: getStatus(
-        parseNum(row.rbc),
-        s === 'M' ? ranges.rbcM.low : ranges.rbcF.low,
-        s === 'M' ? ranges.rbcM.high : ranges.rbcF.high
-      ),
-    },
-    {
-      key: 'hb',
-      ...(s === 'M' ? ranges.hbM : ranges.hbF),
-      value: parseNum(row.hb),
-      status: getStatus(
-        parseNum(row.hb),
-        s === 'M' ? ranges.hbM.low : ranges.hbF.low,
-        s === 'M' ? ranges.hbM.high : ranges.hbF.high
-      ),
-    },
-    {
-      key: 'hct',
-      ...(s === 'M' ? ranges.hctM : ranges.hctF),
-      value: parseNum(row.hct),
-      status: getStatus(
-        parseNum(row.hct),
-        s === 'M' ? ranges.hctM.low : ranges.hctF.low,
-        s === 'M' ? ranges.hctM.high : ranges.hctF.high
-      ),
-    },
-    {
+      status: getStatus(parseNum(row.rbc), rbcRange.low, rbcRange.high),
+    })
+  }
+
+  // Hemoglobin – all machines
+  const hbRange = s === 'M' ? ranges.hbM : ranges.hbF
+  pack.push({
+    key: 'hb',
+    ...hbRange,
+    value: parseNum(row.hb),
+    status: getStatus(parseNum(row.hb), hbRange.low, hbRange.high),
+  })
+
+  // Hematocrit – all machines
+  const hctRange = s === 'M' ? ranges.hctM : ranges.hctF
+  pack.push({
+    key: 'hct',
+    ...hctRange,
+    value: parseNum(row.hct),
+    status: getStatus(parseNum(row.hct), hctRange.low, hctRange.high),
+  })
+
+  // Red cell indices – Pentra / generic only
+  if (!isAbbott) {
+    pack.push({
       key: 'mcv',
       ...ranges.mcv,
       value: parseNum(row.mcv),
       status: getStatus(parseNum(row.mcv), ranges.mcv.low, ranges.mcv.high),
-    },
-    {
+    })
+    pack.push({
       key: 'mch',
       ...ranges.mch,
       value: parseNum(row.mch),
       status: getStatus(parseNum(row.mch), ranges.mch.low, ranges.mch.high),
-    },
-    {
+    })
+    pack.push({
       key: 'mchc',
       ...ranges.mchc,
       value: parseNum(row.mchc),
-      status: getStatus(parseNum(row.mchc), ranges.mchc.low, ranges.mchc.high),
-    },
-    {
-      key: 'plt',
-      ...ranges.plt,
-      value: parseNum(row.plt),
-      status: getStatus(parseNum(row.plt), ranges.plt.low, ranges.plt.high),
-    },
-    {
-      key: 'neut',
-      ...ranges.neut,
-      value: parseNum(row.neutrophils),
-      status: getStatus(parseNum(row.neutrophils), ranges.neut.low, ranges.neut.high),
-    },
-    {
-      key: 'lymph',
-      ...ranges.lymph,
-      value: parseNum(row.lymphocytes),
-      status: getStatus(parseNum(row.lymphocytes), ranges.lymph.low, ranges.lymph.high),
-    },
-    {
-      key: 'mono',
-      ...ranges.mono,
-      value: parseNum(row.monocytes),
-      status: getStatus(parseNum(row.monocytes), ranges.mono.low, ranges.mono.high),
-    },
-    {
-      key: 'eos',
-      ...ranges.eos,
-      value: parseNum(row.eosinophils),
-      status: getStatus(parseNum(row.eosinophils), ranges.eos.low, ranges.eos.high),
-    },
-    {
-      key: 'baso',
-      ...ranges.baso,
-      value: parseNum(row.basophils),
-      status: getStatus(parseNum(row.basophils), ranges.baso.low, ranges.baso.high),
-    },
-  ]
+      status: getStatus(
+        parseNum(row.mchc),
+        ranges.mchc.low,
+        ranges.mchc.high,
+      ),
+    })
+  }
+
+  // Platelets – all machines
+  pack.push({
+    key: 'plt',
+    ...ranges.plt,
+    value: parseNum(row.plt),
+    status: getStatus(parseNum(row.plt), ranges.plt.low, ranges.plt.high),
+  })
+
+  // Differential ranges: Pentra vs Abbott
+  const neutRange = isAbbott
+    ? { ...ranges.neut, low: 0.37, high: 0.72, label: 'Segmenters / Neutrophils' }
+    : ranges.neut
+  const lymphRange = isAbbott
+    ? { ...ranges.lymph, low: 0.20, high: 0.50 }
+    : ranges.lymph
+  const monoRange = isAbbott
+    ? { ...ranges.mono, low: 0.08, high: 0.14 }
+    : ranges.mono
+  const eosRange = isAbbott
+    ? { ...ranges.eos, low: 0.00, high: 0.06 }
+    : ranges.eos
+  const basoRange = ranges.baso // same for both
+
+  pack.push({
+    key: 'neut',
+    ...neutRange,
+    value: parseNum(row.neutrophils),
+    status: getStatus(
+      parseNum(row.neutrophils),
+      neutRange.low,
+      neutRange.high,
+    ),
+  })
+  pack.push({
+    key: 'lymph',
+    ...lymphRange,
+    value: parseNum(row.lymphocytes),
+    status: getStatus(
+      parseNum(row.lymphocytes),
+      lymphRange.low,
+      lymphRange.high,
+    ),
+  })
+  pack.push({
+    key: 'mono',
+    ...monoRange,
+    value: parseNum(row.monocytes),
+    status: getStatus(
+      parseNum(row.monocytes),
+      monoRange.low,
+      monoRange.high,
+    ),
+  })
+  pack.push({
+    key: 'eos',
+    ...eosRange,
+    value: parseNum(row.eosinophils),
+    status: getStatus(
+      parseNum(row.eosinophils),
+      eosRange.low,
+      eosRange.high,
+    ),
+  })
+  pack.push({
+    key: 'baso',
+    ...basoRange,
+    value: parseNum(row.basophils),
+    status: getStatus(
+      parseNum(row.basophils),
+      basoRange.low,
+      basoRange.high,
+    ),
+  })
 
   return pack
 })
@@ -280,10 +360,20 @@ const labLocation = computed(() => {
 const displayTestDate = computed(() => {
   const row = selectedItem.value || {}
   if (!row.test_date) return ''
-  return String(row.test_date).includes('T') ? String(row.test_date).split('T')[0] : row.test_date
+  return String(row.test_date).includes('T')
+    ? String(row.test_date).split('T')[0]
+    : row.test_date
 })
 
-const hasCBCSummary = computed(() => (selectedSummaryItems.value || []).length > 0)
+const selectedMachineLabel = computed(() => {
+  const row = selectedItem.value
+  if (!row) return ''
+  return analyzerInfo(row).label
+})
+
+const hasCBCSummary = computed(
+  () => (selectedSummaryItems.value || []).length > 0,
+)
 
 /* ---------- data ---------- */
 
@@ -352,7 +442,10 @@ async function togglePinned(row, event) {
     if (selectedItem.value && selectedItem.value.id === row.id) {
       selectedItem.value.pinned = newPinned
     }
-    showSnackbar(newPinned ? 'Report pinned.' : 'Report unpinned.', 'success')
+    showSnackbar(
+      newPinned ? 'Report pinned.' : 'Report unpinned.',
+      'success',
+    )
   }
 
   pinLoadingId.value = null
@@ -385,7 +478,10 @@ function toggleSelectRow(row, event) {
   if (event) event.stopPropagation()
 
   if (row.pinned) {
-    showSnackbar('Pinned reports cannot be selected for deletion.', 'warning')
+    showSnackbar(
+      'Pinned reports cannot be selected for deletion.',
+      'warning',
+    )
     return
   }
 
@@ -417,7 +513,10 @@ async function confirmBulkDelete() {
   )
 
   if (blocked.length) {
-    showSnackbar('Pinned reports cannot be deleted. Unpin them first.', 'warning')
+    showSnackbar(
+      'Pinned reports cannot be deleted. Unpin them first.',
+      'warning',
+    )
     selectedIds.value = selectedIds.value.filter(
       (id) => !blocked.some((b) => b.id === id),
     )
@@ -429,7 +528,9 @@ async function confirmBulkDelete() {
   let hadError = false
 
   for (const id of idsToDelete) {
-    const { error } = await supabase.rpc('delete_cbc_history', { p_id: id })
+    const { error } = await supabase.rpc('delete_cbc_history', {
+      p_id: id,
+    })
     if (error) {
       console.error('delete_cbc_history error', id, error)
       hadError = true
@@ -447,7 +548,10 @@ async function confirmBulkDelete() {
   selectedIds.value = []
 
   if (hadError) {
-    showSnackbar('Some reports could not be deleted. Please try again.', 'error')
+    showSnackbar(
+      'Some reports could not be deleted. Please try again.',
+      'error',
+    )
   } else {
     showSnackbar('Selected reports deleted.', 'success')
   }
@@ -608,7 +712,11 @@ async function exportAsPdf() {
       const imgW = img.width
       const imgH = img.height
 
-      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'pt',
+        format: 'a4',
+      })
       const pageW = pdf.internal.pageSize.getWidth()
       const pageH = pdf.internal.pageSize.getHeight()
       const margin = 24
@@ -635,7 +743,10 @@ async function exportAsPdf() {
             sliceBottom > alertTop &&
             sliceBottom < alertBottom
           ) {
-            const safeHeight = Math.max(Math.floor(alertTop - sliceTop - 6), 80)
+            const safeHeight = Math.max(
+              Math.floor(alertTop - sliceTop - 6),
+              80,
+            )
             sliceHeightPx = safeHeight
           }
         }
@@ -656,7 +767,7 @@ async function exportAsPdf() {
           0,
           0,
           imgW,
-          sliceHeightPx
+          sliceHeightPx,
         )
 
         const sliceDataUrl = canvas.toDataURL('image/png')
@@ -673,7 +784,7 @@ async function exportAsPdf() {
           margin,
           margin,
           maxW,
-          renderH
+          renderH,
         )
 
         yOffset += sliceHeightPx
@@ -717,7 +828,9 @@ onMounted(fetchHistory)
                 <v-icon size="20" color="blue-darken-1">mdi-history</v-icon>
                 {{
                   selectionMode
-                    ? (hasSelection ? `${selectedIds.length} Selected` : 'Select Reports')
+                    ? (hasSelection
+                      ? `${selectedIds.length} Selected`
+                      : 'Select Reports')
                     : 'History'
                 }}
               </h2>
@@ -748,8 +861,12 @@ onMounted(fetchHistory)
             </div>
           </div>
 
-          <p v-if="!selectionMode" class="text-body-2 mb-3 text-grey-darken-1 mb-6">
-            Browse your saved CBC interpretations. Tap an entry to open the full report.
+          <p
+            v-if="!selectionMode"
+            class="text-body-2 mb-3 text-grey-darken-1 mb-6"
+          >
+            Browse your saved CBC interpretations. Tap an entry to open
+            the full report.
           </p>
 
           <!-- Filter Pills -->
@@ -758,7 +875,10 @@ onMounted(fetchHistory)
               variant="flat"
               class="filter-pill"
               :class="{ 'filter-pill-active': activeProvider === 'all' }"
-              @click="activeProvider = 'all'; clearSelection()"
+              @click="
+                activeProvider = 'all';
+                clearSelection();
+              "
             >
               ALL
             </v-btn>
@@ -766,31 +886,54 @@ onMounted(fetchHistory)
               variant="flat"
               class="filter-pill"
               :class="{ 'filter-pill-active': activeProvider === 'groq' }"
-              @click="activeProvider = 'groq'; clearSelection()"
+              @click="
+                activeProvider = 'groq';
+                clearSelection();
+              "
             >
               QWEN
             </v-btn>
             <v-btn
               variant="flat"
               class="filter-pill"
-              :class="{ 'filter-pill-active': activeProvider === 'openai' }"
-              @click="activeProvider = 'openai'; clearSelection()"
+              :class="{
+                'filter-pill-active': activeProvider === 'openai',
+              }"
+              @click="
+                activeProvider = 'openai';
+                clearSelection();
+              "
             >
               CHATGPT 4O
             </v-btn>
           </div>
 
           <!-- Error -->
-          <v-alert v-if="errorMsg" type="error" variant="tonal" class="mb-4">
+          <v-alert
+            v-if="errorMsg"
+            type="error"
+            variant="tonal"
+            class="mb-4"
+          >
             {{ errorMsg }}
           </v-alert>
 
           <!-- Loading -->
-          <v-skeleton-loader v-if="loading" type="card, card, card" class="mb-4" />
+          <v-skeleton-loader
+            v-if="loading"
+            type="card, card, card"
+            class="mb-4"
+          />
 
           <!-- Empty -->
-          <v-alert v-else-if="!filteredItems.length" type="info" variant="tonal" class="mb-2">
-            No saved interpretations found. After generating a CBC explanation, click
+          <v-alert
+            v-else-if="!filteredItems.length"
+            type="info"
+            variant="tonal"
+            class="mb-2"
+          >
+            No saved interpretations found. After generating a CBC
+            explanation, click
             <strong>“Save to History”</strong> to store it here.
           </v-alert>
 
@@ -802,10 +945,15 @@ onMounted(fetchHistory)
               class="history-row"
               :class="{
                 'history-row-pinned': row.pinned,
-                'history-row-selected': isSelected(row) && selectionMode,
+                'history-row-selected':
+                  isSelected(row) && selectionMode,
               }"
               variant="flat"
-              @click="selectionMode ? toggleSelectRow(row, $event) : openItem(row)"
+              @click="
+                selectionMode
+                  ? toggleSelectRow(row, $event)
+                  : openItem(row)
+              "
             >
               <div class="row-inner">
                 <transition name="fade">
@@ -824,21 +972,31 @@ onMounted(fetchHistory)
                 </div>
 
                 <div class="row-content">
-                  <div class="row-top d-flex align-center justify-space-between">
+                  <div
+                    class="row-top d-flex align-center justify-space-between"
+                  >
                     <div class="d-flex align-center ga-1">
                       <v-chip
                         size="x-small"
                         class="status-pill"
                         :style="{
-                          backgroundColor: providerPillColor(row.provider),
+                          backgroundColor: providerPillColor(
+                            row.provider,
+                          ),
                           color: providerPillTextColor(row.provider),
                         }"
                       >
                         {{ providerLabel(row.provider) }}
                       </v-chip>
 
-                      <v-chip v-if="row.pinned" size="x-small" class="pinned-pill">
-                        <v-icon size="13" class="me-1">mdi-pin</v-icon>
+                      <v-chip
+                        v-if="row.pinned"
+                        size="x-small"
+                        class="pinned-pill"
+                      >
+                        <v-icon size="13" class="me-1">
+                          mdi-pin
+                        </v-icon>
                         Pinned
                       </v-chip>
                     </div>
@@ -851,19 +1009,29 @@ onMounted(fetchHistory)
                       :loading="pinLoadingId === row.id"
                       @click.stop="togglePinned(row, $event)"
                     >
-                      <v-icon size="16" class="pin-icon" :class="{ active: row.pinned }">
-                        {{ row.pinned ? 'mdi-pin' : 'mdi-pin-outline' }}
+                      <v-icon
+                        size="16"
+                        class="pin-icon"
+                        :class="{ active: row.pinned }"
+                      >
+                        {{
+                          row.pinned ? 'mdi-pin' : 'mdi-pin-outline'
+                        }}
                       </v-icon>
                     </v-btn>
                   </div>
 
                   <div class="row-title">
-                    CBC Interpretation • Age {{ row.test_age ?? '—' }} • {{ sexLabel(row.test_sex) }}
+                    CBC Interpretation • Age
+                    {{ row.test_age ?? '—' }} •
+                    {{ sexLabel(row.test_sex) }}
                   </div>
 
                   <div class="row-meta">
                     <span class="meta-date">
-                      <v-icon size="14" class="me-1">mdi-calendar-clock</v-icon>
+                      <v-icon size="14" class="me-1">
+                        mdi-calendar-clock
+                      </v-icon>
                       {{ formattedDate(row.created_at) }}
                     </span>
                     <span class="dot hidden-xs-only">•</span>
@@ -894,7 +1062,11 @@ onMounted(fetchHistory)
         <!-- ============ DETAIL MODE (shows full Result-like view) ============ -->
         <div v-else>
           <div class="d-flex align-center justify-space-between mb-3">
-            <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="closeDetail">
+            <v-btn
+              variant="text"
+              prepend-icon="mdi-arrow-left"
+              @click="closeDetail"
+            >
               Back
             </v-btn>
 
@@ -903,11 +1075,14 @@ onMounted(fetchHistory)
                 size="small"
                 class="status-pill"
                 :style="{
-                  backgroundColor: providerPillColor(selectedItem.provider),
+                  backgroundColor: providerPillColor(
+                    selectedItem.provider,
+                  ),
                   color: providerPillTextColor(selectedItem.provider),
                 }"
               >
-                {{ providerLabel(selectedItem.provider) }} • {{ selectedItem.model }}
+                {{ providerLabel(selectedItem.provider) }} •
+                {{ selectedItem.model }}
               </v-chip>
 
               <v-btn
@@ -918,8 +1093,16 @@ onMounted(fetchHistory)
                 :loading="pinLoadingId === selectedItem.id"
                 @click="togglePinned(selectedItem, $event)"
               >
-                <v-icon size="18" class="pin-icon" :class="{ active: selectedItem.pinned }">
-                  {{ selectedItem.pinned ? 'mdi-pin' : 'mdi-pin-outline' }}
+                <v-icon
+                  size="18"
+                  class="pin-icon"
+                  :class="{ active: selectedItem.pinned }"
+                >
+                  {{
+                    selectedItem.pinned
+                      ? 'mdi-pin'
+                      : 'mdi-pin-outline'
+                  }}
                 </v-icon>
               </v-btn>
             </div>
@@ -940,46 +1123,80 @@ onMounted(fetchHistory)
                 <!-- TOP SECTION: Personal details + Status Overview -->
                 <div class="top-section">
                   <!-- Personal & Lab Details -->
-                  <v-sheet class="meta-sheet" rounded="xl" variant="outlined">
+                  <v-sheet
+                    class="meta-sheet"
+                    rounded="xl"
+                    variant="outlined"
+                  >
                     <v-row dense>
                       <v-col cols="12" md="4">
                         <div class="meta-label">Patient Name</div>
-                        <div class="meta-value">{{ patientName || 'Not set in profile' }}</div>
+                        <div class="meta-value">
+                          {{ patientName || 'Not set in profile' }}
+                        </div>
                       </v-col>
 
                       <v-col cols="6" md="2">
                         <div class="meta-label">Age</div>
-                        <div class="meta-value">{{ selectedItem.test_age ?? '—' }}</div>
+                        <div class="meta-value">
+                          {{ selectedItem.test_age ?? '—' }}
+                        </div>
                       </v-col>
 
                       <v-col cols="6" md="2">
                         <div class="meta-label">Sex</div>
-                        <div class="meta-value">{{ sexLabel(selectedItem.test_sex) }}</div>
+                        <div class="meta-value">
+                          {{ sexLabel(selectedItem.test_sex) }}
+                        </div>
                       </v-col>
 
                       <v-col cols="12" md="4">
                         <div class="meta-label">Laboratory Name</div>
-                        <div class="meta-value">{{ selectedItem.test_lab_name || '—' }}</div>
+                        <div class="meta-value">
+                          {{ selectedItem.test_lab_name || '—' }}
+                        </div>
+                      </v-col>
+
+                      <!-- NEW: CBC Machine / Analyzer -->
+                      <v-col cols="12" md="4">
+                        <div class="meta-label">
+                          CBC Machine / Analyzer
+                        </div>
+                        <div class="meta-value">
+                          {{ selectedMachineLabel || '—' }}
+                        </div>
                       </v-col>
 
                       <v-col cols="12" md="4">
-                        <div class="meta-label">Laboratory Location</div>
-                        <div class="meta-value">{{ labLocation || '—' }}</div>
+                        <div class="meta-label">
+                          Laboratory Location
+                        </div>
+                        <div class="meta-value">
+                          {{ labLocation || '—' }}
+                        </div>
                       </v-col>
 
                       <v-col cols="6" md="2">
                         <div class="meta-label">Test Date</div>
-                        <div class="meta-value">{{ displayTestDate || '—' }}</div>
+                        <div class="meta-value">
+                          {{ displayTestDate || '—' }}
+                        </div>
                       </v-col>
 
                       <v-col cols="6" md="2">
                         <div class="meta-label">Country</div>
-                        <div class="meta-value">{{ selectedItem.test_lab_country || '—' }}</div>
+                        <div class="meta-value">
+                          {{
+                            selectedItem.test_lab_country || '—'
+                          }}
+                        </div>
                       </v-col>
 
                       <v-col cols="12" md="4">
                         <div class="meta-label">Saved</div>
-                        <div class="meta-value">{{ formattedDate(selectedItem.created_at) }}</div>
+                        <div class="meta-value">
+                          {{ formattedDate(selectedItem.created_at) }}
+                        </div>
                       </v-col>
                     </v-row>
                   </v-sheet>
@@ -991,7 +1208,9 @@ onMounted(fetchHistory)
                     rounded="xl"
                     variant="outlined"
                   >
-                    <div class="cbc-summary-header d-flex align-center gap-2 mb-2">
+                    <div
+                      class="cbc-summary-header d-flex align-center gap-2 mb-2"
+                    >
                       <span class="section-emoji small">📋</span>
                       <h3>Status Overview</h3>
                     </div>
@@ -1007,11 +1226,18 @@ onMounted(fetchHistory)
                         class="mb-1"
                       >
                         <div class="cbc-item">
-                          <div class="cbc-label">{{ item.label }}</div>
+                          <div class="cbc-label">
+                            {{ item.label }}
+                          </div>
                           <div class="cbc-value-line">
-                            <span class="cbc-value">{{ fmtVal(item) }}</span>
+                            <span class="cbc-value">
+                              {{ fmtVal(item) }}
+                            </span>
                             <v-chip
-                              v-if="item.status && item.status !== '—'"
+                              v-if="
+                                item.status &&
+                                  item.status !== '—'
+                              "
                               :color="chipColor(item.status)"
                               size="x-small"
                               variant="elevated"
@@ -1020,7 +1246,9 @@ onMounted(fetchHistory)
                               {{ item.status }}
                             </v-chip>
                           </div>
-                          <div class="cbc-ref">Ref: {{ formatRef(item) }}</div>
+                          <div class="cbc-ref">
+                            Ref: {{ formatRef(item) }}
+                          </div>
                         </div>
                       </v-col>
                     </v-row>
@@ -1029,16 +1257,24 @@ onMounted(fetchHistory)
 
                 <!-- Interpretation -->
                 <div class="mt-6 ai-section">
-                  <div class="ai-header d-flex align-center gap-2 mb-2">
+                  <div
+                    class="ai-header d-flex align-center gap-2 mb-2"
+                  >
                     <span class="section-emoji">🤖</span>
-                    <span class="ai-title">AI-Assisted Explanation</span>
+                    <span class="ai-title">
+                      AI-Assisted Explanation
+                    </span>
                   </div>
 
                   <div class="ai-model-line mb-2">
-                    <span class="ai-model-label me-2">Model used</span>
+                    <span class="ai-model-label me-2">
+                      Model used
+                    </span>
                     <span class="ai-model-value">
                       {{ providerLabel(selectedItem.provider) }}
-                      <span v-if="selectedItem.model"> ({{ selectedItem.model }})</span>
+                      <span v-if="selectedItem.model">
+                        ({{ selectedItem.model }})
+                      </span>
                     </span>
                   </div>
 
@@ -1050,18 +1286,29 @@ onMounted(fetchHistory)
                     border="start"
                   >
                     <template #prepend>
-                      <span class="educational-alert-emoji">⚠️</span>
+                      <span class="educational-alert-emoji">
+                        ⚠️
+                      </span>
                     </template>
 
                     <span class="educational-alert-text">
-                      This explanation is for educational support only and must not replace assessment
-                      by a licensed physician. If you feel unwell or your results are significantly
-                      abnormal, please consult your doctor.
+                      This explanation is for educational support
+                      only and must not replace assessment by a
+                      licensed physician. If you feel unwell or your
+                      results are significantly abnormal, please
+                      consult your doctor.
                     </span>
                   </v-alert>
 
-                  <div v-if="selectedHtml" class="detail-markdown" v-html="selectedHtml"></div>
-                  <div v-else class="text-grey-darken-1 text-body-2">
+                  <div
+                    v-if="selectedHtml"
+                    class="detail-markdown"
+                    v-html="selectedHtml"
+                  ></div>
+                  <div
+                    v-else
+                    class="text-grey-darken-1 text-body-2"
+                  >
                     No interpretation found for this entry.
                   </div>
                 </div>
@@ -1081,8 +1328,13 @@ onMounted(fetchHistory)
             </div>
 
             <!-- Export dropdown (excluded from capture) -->
-            <div class="export-actions d-flex align-center justify-end px-4 pb-4 ga-2">
-              <v-menu location="bottom end" transition="fade-transition">
+            <div
+              class="export-actions d-flex align-center justify-end px-4 pb-4 ga-2"
+            >
+              <v-menu
+                location="bottom end"
+                transition="fade-transition"
+              >
                 <template #activator="{ props }">
                   <v-btn
                     v-bind="props"
@@ -1094,7 +1346,9 @@ onMounted(fetchHistory)
                     :disabled="exporting"
                   >
                     Export
-                    <v-icon end class="ms-1">mdi-chevron-down</v-icon>
+                    <v-icon end class="ms-1">
+                      mdi-chevron-down
+                    </v-icon>
                   </v-btn>
                 </template>
 
@@ -1104,7 +1358,9 @@ onMounted(fetchHistory)
                       <v-icon>mdi-image-outline</v-icon>
                     </template>
                     <v-list-item-title>Image</v-list-item-title>
-                    <v-list-item-subtitle>PNG export</v-list-item-subtitle>
+                    <v-list-item-subtitle>
+                      PNG export
+                    </v-list-item-subtitle>
                   </v-list-item>
 
                   <v-divider class="my-1" />
@@ -1114,7 +1370,9 @@ onMounted(fetchHistory)
                       <v-icon>mdi-file-pdf-box</v-icon>
                     </template>
                     <v-list-item-title>PDF</v-list-item-title>
-                    <v-list-item-subtitle>For printing & sharing</v-list-item-subtitle>
+                    <v-list-item-subtitle>
+                      For printing &amp; sharing
+                    </v-list-item-subtitle>
                   </v-list-item>
                 </v-list>
               </v-menu>
@@ -1131,14 +1389,25 @@ onMounted(fetchHistory)
             <v-card-text class="text-body-2">
               This will permanently remove
               <strong>{{ selectedIds.length }}</strong>
-              selected CBC interpretation<span v-if="selectedIds.length > 1">s</span>.
-              This action cannot be undone.
+              selected CBC interpretation<span
+                v-if="selectedIds.length > 1"
+                >s</span
+              >. This action cannot be undone.
             </v-card-text>
             <v-card-actions class="justify-end">
-              <v-btn variant="text" :disabled="bulkDeleteLoading" @click="cancelBulkDelete">
+              <v-btn
+                variant="text"
+                :disabled="bulkDeleteLoading"
+                @click="cancelBulkDelete"
+              >
                 Cancel
               </v-btn>
-              <v-btn color="error" variant="flat" :loading="bulkDeleteLoading" @click="confirmBulkDelete">
+              <v-btn
+                color="error"
+                variant="flat"
+                :loading="bulkDeleteLoading"
+                @click="confirmBulkDelete"
+              >
                 Yes, delete
               </v-btn>
             </v-card-actions>
@@ -1146,7 +1415,12 @@ onMounted(fetchHistory)
         </v-dialog>
 
         <!-- Snackbar feedback -->
-        <v-snackbar v-model="snackbar" :color="snackbarColor" location="bottom" timeout="2200">
+        <v-snackbar
+          v-model="snackbar"
+          :color="snackbarColor"
+          location="bottom"
+          timeout="2200"
+        >
           {{ snackbarMessage }}
         </v-snackbar>
       </v-container>
@@ -1175,14 +1449,20 @@ onMounted(fetchHistory)
   display: block;
   height: 2px;
   width: 50px;
-  background-color: #1E88E5;
+  background-color: #1e88e5;
   border-radius: 999px;
   margin-top: 2px;
 }
 @media (max-width: 600px) {
-  .history-title::after { width: 50px; }
+  .history-title::after {
+    width: 50px;
+  }
 }
-.history-actions { display: flex; align-items: center; gap: 6px; }
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* Filter pills */
 .filter-pill {
@@ -1195,55 +1475,145 @@ onMounted(fetchHistory)
   color: #4b4f6a;
   box-shadow: 0 2px 4px rgba(15, 23, 42, 0.12);
 }
-.filter-pill-active { background: #5b93d7; color: #ffffff; }
+.filter-pill-active {
+  background: #5b93d7;
+  color: #ffffff;
+}
 .filters-wrapper {
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
 }
 
 /* List rows */
 .history-row {
-  box-shadow: none; border-radius: 0; border-bottom: 1px solid rgba(148, 163, 253, 0.18);
-  padding: 9px 10px; cursor: pointer;
-  transition: background-color 0.16s ease, transform 0.12s ease, border-color 0.16s ease;
+  box-shadow: none;
+  border-radius: 0;
+  border-bottom: 1px solid rgba(148, 163, 253, 0.18);
+  padding: 9px 10px;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    transform 0.12s ease,
+    border-color 0.16s ease;
 }
-.history-row:last-of-type { border-bottom: none; }
-.history-row:hover { transform: translateY(-1px); }
+.history-row:last-of-type {
+  border-bottom: none;
+}
+.history-row:hover {
+  transform: translateY(-1px);
+}
 .history-row-selected {
-  background-color: rgba(183, 8, 26, 0.12); border-left: 3px solid #b69da4; transform: translateX(2px);
+  background-color: rgba(183, 8, 26, 0.12);
+  border-left: 3px solid #b69da4;
+  transform: translateX(2px);
   transition: all 0.25s ease;
 }
 @media (prefers-color-scheme: dark) {
-  .history-row-selected { background-color: rgba(183, 8, 26, 0.22); border-left-color: #f2cccc; }
+  .history-row-selected {
+    background-color: rgba(183, 8, 26, 0.22);
+    border-left-color: #f2cccc;
+  }
 }
-.row-inner { display: flex; align-items: center; gap: 10px; }
-.select-box-wrap { display: flex; align-items: center; justify-content: center; padding-left: 2px; }
+.row-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.select-box-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 2px;
+}
 .avatar-circle {
-  width: 34px; height: 34px; border-radius: 50%; background: #f2cccc; color: #b9081a;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #f2cccc;
+  color: #b9081a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.row-content { flex: 1; min-width: 0; }
-.status-pill { border-radius: 999px; padding-inline: 10px; font-weight: 600; }
+.row-content {
+  flex: 1;
+  min-width: 0;
+}
+.status-pill {
+  border-radius: 999px;
+  padding-inline: 10px;
+  font-weight: 600;
+}
 .pinned-pill {
-  border-radius: 999px; padding-inline: 8px; font-size: 0.65rem; background-color: #fff5f5;
-  color: #b70d37; display: inline-flex; align-items: center;
+  border-radius: 999px;
+  padding-inline: 8px;
+  font-size: 0.65rem;
+  background-color: #fff5f5;
+  color: #b70d37;
+  display: inline-flex;
+  align-items: center;
 }
-.pin-btn { min-width: 0; padding: 0; }
-.pin-icon { color: #9ca3af; border-radius: 50%; padding: 12px; transition: all 0.2s ease; }
-.pin-icon.active { color: #b9081a !important; background-color: #f2cccc !important; }
-.pin-icon:hover { background-color: #f3f4f6; transform: scale(1.05); }
-.pin-icon.active:hover { background-color: #f7d9d9 !important; }
+.pin-btn {
+  min-width: 0;
+  padding: 0;
+}
+.pin-icon {
+  color: #9ca3af;
+  border-radius: 50%;
+  padding: 12px;
+  transition: all 0.2s ease;
+}
+.pin-icon.active {
+  color: #b9081a !important;
+  background-color: #f2cccc !important;
+}
+.pin-icon:hover {
+  background-color: #f3f4f6;
+  transform: scale(1.05);
+}
+.pin-icon.active:hover {
+  background-color: #f7d9d9 !important;
+}
 
-.row-title { font-size: 0.88rem; font-weight: 600; margin-top: 2px; }
-.row-meta {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
-  font-size: 0.74rem; color: #6b7280; margin-top: 2px;
+.row-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-top: 2px;
 }
-.row-meta .dot { margin: 0 3px; }
-.preview-text { color: #9ca3af; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.74rem;
+  color: #6b7280;
+  margin-top: 2px;
+}
+.row-meta .dot {
+  margin: 0 3px;
+}
+.preview-text {
+  color: #9ca3af;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Detail card */
-.detail-card { border-radius: 24px; border: 2px solid #0D47A1; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); padding: 2px; }
-.detail-card :deep(.v-card-text) { padding: 18px 18px 20px; }
+.detail-card {
+  border-radius: 24px;
+  border: 2px solid #0d47a1;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  padding: 2px;
+}
+.detail-card :deep(.v-card-text) {
+  padding: 18px 18px 20px;
+}
 
 /* Capture root export layout */
 .capture-root.export-layout {
@@ -1288,21 +1658,50 @@ onMounted(fetchHistory)
 }
 
 /* Meta section */
-.meta-sheet { padding: 10px 20px; border: 2px solid #b3bbc9; }
-.meta-label {
-  font-size: 0.7rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.06em;
+.meta-sheet {
+  padding: 10px 20px;
+  border: 2px solid #b3bbc9;
 }
-.meta-value { font-size: 0.9rem; font-weight: 600; margin-top: 2px; }
+.meta-label {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.meta-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
 
 /* CBC Summary */
-.cbc-summary-sheet { padding: 10px 14px; }
-.cbc-summary-header { font-size: 0.8rem; }
-.cbc-item { padding: 4px 0; }
-.cbc-label { font-size: 0.75rem; }
-.cbc-value-line { display: flex; align-items: center; gap: 6px; }
-.cbc-value { font-size: 0.9rem; font-weight: 600; }
-.cbc-ref { font-size: 0.68rem; }
-.status-chip { font-size: 0.6rem; }
+.cbc-summary-sheet {
+  padding: 10px 14px;
+}
+.cbc-summary-header {
+  font-size: 0.8rem;
+}
+.cbc-item {
+  padding: 4px 0;
+}
+.cbc-label {
+  font-size: 0.75rem;
+}
+.cbc-value-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cbc-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.cbc-ref {
+  font-size: 0.68rem;
+}
+.status-chip {
+  font-size: 0.6rem;
+}
 
 /* Force 2 columns for Status Overview items ONLY on export clone */
 .capture-root.export-layout .cbc-summary-sheet :deep(.v-row) {
@@ -1315,21 +1714,38 @@ onMounted(fetchHistory)
 }
 
 /* AI Section */
-.ai-section { margin-top: 18px; }
-.ai-header .ai-title { font-weight: 600; font-size: 0.98rem; }
+.ai-section {
+  margin-top: 18px;
+}
+.ai-header .ai-title {
+  font-weight: 600;
+  font-size: 0.98rem;
+}
 .detail-markdown {
-  margin-top: 10px; padding: 10px 14px 8px; border-radius: 18px;
-  font-size: 0.9rem; line-height: 1.6;
+  margin-top: 10px;
+  padding: 10px 14px 8px;
+  border-radius: 18px;
+  font-size: 0.9rem;
+  line-height: 1.6;
 }
-.detail-markdown h2, .detail-markdown h3 {
-  margin-top: 0.65rem; margin-bottom: 0.2rem; font-size: 0.96rem; font-weight: 600;
+.detail-markdown h2,
+.detail-markdown h3 {
+  margin-top: 0.65rem;
+  margin-bottom: 0.2rem;
+  font-size: 0.96rem;
+  font-weight: 600;
 }
-.detail-markdown ul, .detail-markdown ol {
+.detail-markdown ul,
+.detail-markdown ol {
   padding-left: 1.4rem;
   margin: 0.3rem 0 0.55rem;
 }
-.detail-markdown li { margin: 0.14rem 0; }
-.detail-markdown strong { font-weight: 600; }
+.detail-markdown li {
+  margin: 0.14rem 0;
+}
+.detail-markdown strong {
+  font-weight: 600;
+}
 
 /* Tighter bullets + text only on export clone to avoid big blank spaces */
 .capture-root.export-layout .detail-markdown {
@@ -1382,30 +1798,76 @@ onMounted(fetchHistory)
 }
 
 /* transitions + misc */
-.history-list-move { transition: transform 0.2s ease, opacity 0.2s ease; }
-.history-list-enter-active, .history-list-leave-active { transition: all 0.2s ease; }
-.history-list-enter-from, .history-list-leave-to { opacity: 0; transform: translateY(4px); }
-.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+.history-list-move {
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
+}
+.history-list-enter-active,
+.history-list-leave-active {
+  transition: all 0.2s ease;
+}
+.history-list-enter-from,
+.history-list-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
 
 /* Bulk-delete FAB */
 .delete-fab {
-  position: fixed !important; right: 18px !important; bottom: 110px !important;
-  width: 52px; height: 52px; border-radius: 999px; min-width: 0; padding: 0;
-  background-color: #b70d37 !important; color: #ffffff !important;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.26); display: flex; align-items: center; justify-content: center;
-  z-index: 1400; transition: transform 0.18s ease, box-shadow 0.18s ease;
+  position: fixed !important;
+  right: 18px !important;
+  bottom: 110px !important;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  min-width: 0;
+  padding: 0;
+  background-color: #b70d37 !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.26);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1400;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
 }
-.delete-fab:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); }
+.delete-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+}
 
 @media (max-width: 600px) {
-  .history-header { flex-direction: row; align-items: center; }
-  .row-title { font-size: 0.84rem; }
-  .row-meta { font-size: 0.7rem; }
-  .delete-fab { bottom: 72px; right: 16px; }
+  .history-header {
+    flex-direction: row;
+    align-items: center;
+  }
+  .row-title {
+    font-size: 0.84rem;
+  }
+  .row-meta {
+    font-size: 0.7rem;
+  }
+  .delete-fab {
+    bottom: 72px;
+    right: 16px;
+  }
 }
 
-.cancel-select-btn { color: #b70d37 !important; font-weight: 600; }
+.cancel-select-btn {
+  color: #b70d37 !important;
+  font-weight: 600;
+}
 
 /* Export bar styles */
 .export-actions :deep(.v-btn) {

@@ -60,7 +60,14 @@ const resultMeta = ref({
   labName: '',
   labCity: '',
   labCountry: '',
+  analyzer: '',
 })
+
+/* Analyzer options (no "general" anymore) */
+const analyzerItems = [
+  { title: 'Pentra CBC Analyzer', value: 'pentra' },
+  { title: 'Abbott CELL-DYN Ruby', value: 'abbott' },
+]
 
 /* Base form */
 const form = ref({
@@ -71,6 +78,7 @@ const form = ref({
   labCity: '',
   labCountry: 'Philippines',
   testDate: '',
+  analyzer: 'pentra', // pentra | abbott
 
   wbc: '',
   rbc: '',
@@ -94,6 +102,11 @@ const numberRule = (v) => v === '' || v == null || !isNaN(Number(v)) || 'Numbers
 
 const requiredNumberRule = (v) => (v !== '' && v != null && !isNaN(Number(v))) || 'Required number'
 
+/**
+ * Hard limits = only block truly unrealistic values.
+ * These are the ONLY ones that will turn the field red.
+ * Clinical "low/high" will be shown in the summary, not as errors.
+ */
 const hardLimitRule = (min, max, label) => (v) => {
   if (v === '' || v == null) return true
   const n = Number(v)
@@ -105,6 +118,7 @@ const hardLimitRule = (min, max, label) => (v) => {
 const ratioHardRule = hardLimitRule(0, 1, 'Differential (ratio 0–1)')
 const hctHardRule = hardLimitRule(0, 1, 'Hematocrit (0–1)')
 
+/* Very loose realistic bounds */
 const hardLimits = {
   wbc: { min: 0, max: 500 },
   rbc: { min: 0, max: 9 },
@@ -116,7 +130,7 @@ const hardLimits = {
   plt: { min: 0, max: 2000 },
 }
 
-/* ------------ Rule arrays ------------ */
+/* ------------ Rule arrays (same for Pentra + Abbott) ------------ */
 const wbcRules = [requiredNumberRule, hardLimitRule(hardLimits.wbc.min, hardLimits.wbc.max, 'WBC')]
 const rbcRules = [requiredNumberRule, hardLimitRule(hardLimits.rbc.min, hardLimits.rbc.max, 'RBC')]
 const hbRules = [
@@ -135,6 +149,7 @@ const pltRules = [
   hardLimitRule(hardLimits.plt.min, hardLimits.plt.max, 'Platelets'),
 ]
 
+/* Differential: only check number + ratio 0–1 (after we convert %) */
 const neutRules = [numberRule, ratioHardRule]
 const lymphRules = [numberRule, ratioHardRule]
 const monoRules = [numberRule, ratioHardRule]
@@ -151,7 +166,7 @@ const runRules = (value, rules = []) => {
   return true
 }
 
-/* ------------ Step 1 gate (includes lab + city + date) ------------ */
+/* ------------ Step 1 gate (includes lab + city + date + analyzer) ------------ */
 const canProceedFromStep1 = computed(() => {
   const ageNum = Number(form.value.age)
   const hasAge = form.value.age !== '' && !isNaN(ageNum) && ageNum >= 0 && ageNum <= 120
@@ -159,25 +174,35 @@ const canProceedFromStep1 = computed(() => {
   const hasLabName = !!form.value.labName?.trim()
   const hasCity = !!form.value.labCity?.trim()
   const hasTestDate = !!form.value.testDate
+  const hasAnalyzer = !!form.value.analyzer
 
-  return hasAge && hasSex && hasLabName && hasCity && hasTestDate
+  return hasAge && hasSex && hasLabName && hasCity && hasTestDate && hasAnalyzer
 })
 
 const goFromStep1 = () => {
   errorMsg.value = ''
   if (!canProceedFromStep1.value) {
     errorMsg.value =
-      'Please complete age, sex, laboratory name, city, and test date before proceeding.'
+      'Please complete age, sex, laboratory name, city, test date, and CBC machine before proceeding.'
     return
   }
   currentStep.value = 2
 }
 
-/* ------------ Step 2 gate (CBC; block red errors) ------------ */
-const goFromStep2 = () => {
-  errorMsg.value = ''
+/* ------------ Step 2 gate (CBC; block only hard errors) ------------ */
+const getRequiredCBC = () => {
+  if (form.value.analyzer === 'abbott') {
+    // Abbott CELL-DYN Ruby: Hb, Hct, WBC, Platelets are core
+    return [
+      ['wbc', wbcRules],
+      ['hb', hbRules],
+      ['hct', hctRules],
+      ['plt', pltRules],
+    ]
+  }
 
-  const requiredCBC = [
+  // Pentra CBC: full core panel
+  return [
     ['wbc', wbcRules],
     ['rbc', rbcRules],
     ['hb', hbRules],
@@ -187,6 +212,12 @@ const goFromStep2 = () => {
     ['mchc', mchcRules],
     ['plt', pltRules],
   ]
+}
+
+const goFromStep2 = () => {
+  errorMsg.value = ''
+
+  const requiredCBC = getRequiredCBC()
 
   const invalid = requiredCBC.filter(
     ([key, rules]) =>
@@ -206,7 +237,7 @@ const prevStep = () => {
   if (currentStep.value > 1) currentStep.value -= 1
 }
 
-/* ------------ Reference ranges & hints ------------ */
+/* ------------ Reference ranges & hints (for display + summary only) ------------ */
 const ranges = {
   wbc: { low: 5.0, high: 10.0, unit: '×10⁹/L', label: 'WBC' },
   rbcM: { low: 4.5, high: 5.2, unit: '×10¹²/L', label: 'RBC' },
@@ -227,13 +258,22 @@ const ranges = {
 }
 
 const sex = computed(() => (form.value.sex === 'M' ? 'M' : 'F'))
+const analyzer = computed(() => form.value.analyzer || 'pentra')
+const isAbbott = computed(() => analyzer.value === 'abbott')
+
 const rbcHint = computed(() =>
   sex.value === 'M' ? 'Normal: 4.5–5.2 ×10¹²/L' : 'Normal: 3.4–5.6 ×10¹²/L',
 )
-const hbHint = computed(() => (sex.value === 'M' ? 'Normal: 135–175 g/L' : 'Normal: 125–155 g/L'))
-const hctHint = computed(() =>
-  sex.value === 'M' ? 'Normal: 0.40–0.52 L/L' : 'Normal: 0.36–0.48 L/L',
-)
+
+const hbHint = computed(() => {
+  if (isAbbott.value) return 'Normal: 117–140 g/L (Abbott CELL-DYN Ruby)'
+  return sex.value === 'M' ? 'Normal: 135–175 g/L' : 'Normal: 125–155 g/L'
+})
+
+const hctHint = computed(() => {
+  if (isAbbott.value) return 'Normal: 0.34–0.44 L/L (Abbott CELL-DYN Ruby)'
+  return sex.value === 'M' ? 'Normal: 0.40–0.52 L/L' : 'Normal: 0.36–0.48 L/L'
+})
 
 /* ------------ Normalizers & watchers ------------ */
 const parse = (v) => (v === '' || v == null ? NaN : Number(v))
@@ -250,6 +290,7 @@ const normalizeRatio = (v) => {
   if (v === '' || v == null) return ''
   const n = Number(v)
   if (isNaN(n)) return v
+  // allow users to type percentages (e.g., 35) and convert to 0.35
   return n > 1 && n <= 100 ? (n / 100).toFixed(2) : n
 }
 const normalizeHct = (v) => {
@@ -298,96 +339,123 @@ watch(
 /* ------------ Summary table for ResultPage ------------ */
 const summaryItems = computed(() => {
   const s = sex.value
+  const abbott = isAbbott.value
+
+  const wbcRange = ranges.wbc
+  const rbcRange = s === 'M' ? ranges.rbcM : ranges.rbcF
+
+  const hbRange = abbott
+    ? { ...ranges.hbF, low: 117, high: 140 }
+    : s === 'M'
+    ? ranges.hbM
+    : ranges.hbF
+
+  const hctRange = abbott
+    ? { ...ranges.hctF, low: 0.34, high: 0.44 }
+    : s === 'M'
+    ? ranges.hctM
+    : ranges.hctF
+
+  const mcvRange = ranges.mcv
+  const mchRange = ranges.mch
+  const mchcRange = ranges.mchc
+
+  const pltRange = abbott
+    ? { ...ranges.plt, low: 150, high: 390 }
+    : ranges.plt
+
+  const neutRange = abbott
+    ? { ...ranges.neut, low: 0.37, high: 0.72, label: 'Segmenters / Neutrophils' }
+    : ranges.neut
+  const lymphRange = abbott
+    ? { ...ranges.lymph, low: 0.2, high: 0.5 }
+    : ranges.lymph
+  const monoRange = abbott
+    ? { ...ranges.mono, low: 0.08, high: 0.14 }
+    : ranges.mono
+  const eosRange = abbott
+    ? { ...ranges.eos, low: 0, high: 0.06 }
+    : ranges.eos
+  const basoRange = ranges.baso
+
   return [
     {
       key: 'wbc',
-      ...ranges.wbc,
+      ...wbcRange,
       value: parse(form.value.wbc),
-      status: getStatus(parse(form.value.wbc), ranges.wbc.low, ranges.wbc.high),
+      status: getStatus(parse(form.value.wbc), wbcRange.low, wbcRange.high),
     },
     {
       key: 'rbc',
-      ...(s === 'M' ? ranges.rbcM : ranges.rbcF),
+      ...rbcRange,
       value: parse(form.value.rbc),
-      status: getStatus(
-        parse(form.value.rbc),
-        s === 'M' ? ranges.rbcM.low : ranges.rbcF.low,
-        s === 'M' ? ranges.rbcM.high : ranges.rbcF.high,
-      ),
+      status: getStatus(parse(form.value.rbc), rbcRange.low, rbcRange.high),
     },
     {
       key: 'hb',
-      ...(s === 'M' ? ranges.hbM : ranges.hbF),
+      ...hbRange,
       value: parse(form.value.hb),
-      status: getStatus(
-        parse(form.value.hb),
-        s === 'M' ? ranges.hbM.low : ranges.hbF.low,
-        s === 'M' ? ranges.hbM.high : ranges.hbF.high,
-      ),
+      status: getStatus(parse(form.value.hb), hbRange.low, hbRange.high),
     },
     {
       key: 'hct',
-      ...(s === 'M' ? ranges.hctM : ranges.hctF),
+      ...hctRange,
       value: parse(form.value.hct),
-      status: getStatus(
-        parse(form.value.hct),
-        s === 'M' ? ranges.hctM.low : ranges.hctF.low,
-        s === 'M' ? ranges.hctM.high : ranges.hctF.high,
-      ),
+      status: getStatus(parse(form.value.hct), hctRange.low, hctRange.high),
     },
     {
       key: 'mcv',
-      ...ranges.mcv,
+      ...mcvRange,
       value: parse(form.value.mcv),
-      status: getStatus(parse(form.value.mcv), ranges.mcv.low, ranges.mcv.high),
+      status: getStatus(parse(form.value.mcv), mcvRange.low, mcvRange.high),
     },
     {
       key: 'mch',
-      ...ranges.mch,
+      ...mchRange,
       value: parse(form.value.mch),
-      status: getStatus(parse(form.value.mch), ranges.mch.low, ranges.mch.high),
+      status: getStatus(parse(form.value.mch), mchRange.low, mchRange.high),
     },
     {
       key: 'mchc',
-      ...ranges.mchc,
+      ...mchcRange,
       value: parse(form.value.mchc),
-      status: getStatus(parse(form.value.mchc), ranges.mchc.low, ranges.mchc.high),
+      status: getStatus(parse(form.value.mchc), mchcRange.low, mchcRange.high),
     },
     {
       key: 'plt',
-      ...ranges.plt,
+      ...pltRange,
       value: parse(form.value.plt),
-      status: getStatus(parse(form.value.plt), ranges.plt.low, ranges.plt.high),
+      status: getStatus(parse(form.value.plt), pltRange.low, pltRange.high),
     },
     {
       key: 'neut',
-      ...ranges.neut,
+      ...neutRange,
       value: parse(form.value.neutrophils),
-      status: getStatus(parse(form.value.neutrophils), ranges.neut.low, ranges.neut.high),
+      status: getStatus(parse(form.value.neutrophils), neutRange.low, neutRange.high),
     },
     {
       key: 'lymph',
-      ...ranges.lymph,
+      ...lymphRange,
       value: parse(form.value.lymphocytes),
-      status: getStatus(parse(form.value.lymphocytes), ranges.lymph.low, ranges.lymph.high),
+      status: getStatus(parse(form.value.lymphocytes), lymphRange.low, lymphRange.high),
     },
     {
       key: 'mono',
-      ...ranges.mono,
+      ...monoRange,
       value: parse(form.value.monocytes),
-      status: getStatus(parse(form.value.monocytes), ranges.mono.low, ranges.mono.high),
+      status: getStatus(parse(form.value.monocytes), monoRange.low, monoRange.high),
     },
     {
       key: 'eos',
-      ...ranges.eos,
+      ...eosRange,
       value: parse(form.value.eosinophils),
-      status: getStatus(parse(form.value.eosinophils), ranges.eos.low, ranges.eos.high),
+      status: getStatus(parse(form.value.eosinophils), eosRange.low, eosRange.high),
     },
     {
       key: 'baso',
-      ...ranges.baso,
+      ...basoRange,
       value: parse(form.value.basophils),
-      status: getStatus(parse(form.value.basophils), ranges.baso.low, ranges.baso.high),
+      status: getStatus(parse(form.value.basophils), basoRange.low, basoRange.high),
     },
   ]
 })
@@ -396,10 +464,10 @@ const chipColor = (status) =>
   status === 'Low'
     ? 'error'
     : status === 'High'
-      ? 'warning'
-      : status === 'Normal'
-        ? 'success'
-        : undefined
+    ? 'warning'
+    : status === 'Normal'
+    ? 'success'
+    : undefined
 
 const isDiffKey = (k) => ['neut', 'lymph', 'mono', 'eos', 'baso'].includes(k)
 const fmtVal = (item) => {
@@ -425,30 +493,110 @@ function stripThink(text = '') {
   return text.trim()
 }
 
+/* ------------ Ref string helper for prompt ------------ */
+function refString(key) {
+  const s = sex.value
+  const abbott = isAbbott.value
+
+  switch (key) {
+    case 'wbc':
+      return '5–10'
+    case 'rbc':
+      return s === 'M' ? '4.5–5.2' : '3.4–5.6'
+    case 'hb':
+      if (abbott) return '117–140'
+      return s === 'M' ? '135–175' : '125–155'
+    case 'hct':
+      if (abbott) return '0.34–0.44'
+      return s === 'M' ? '0.40–0.52' : '0.36–0.48'
+    case 'plt':
+      return abbott ? '150–390' : '150–400'
+    case 'mcv':
+      return '82–92'
+    case 'mch':
+      return '27–32'
+    case 'mchc':
+      return '320–380'
+    case 'neut':
+      return abbott ? '0.37–0.72' : '0.50–0.70'
+    case 'lymph':
+      return abbott ? '0.20–0.50' : '0.20–0.40'
+    case 'mono':
+      return abbott ? '0.08–0.14' : '0.02–0.06'
+    case 'eos':
+      return abbott ? '0.00–0.06' : '0.02–0.05'
+    case 'baso':
+      return '0.00–0.01'
+    default:
+      return ''
+  }
+}
+
 /* ------------ Prompt builder ------------ */
 function buildPrompt() {
   const s = sex.value
 
-  const core = [
+  const coreLines = [
     `Age: ${form.value.age}`,
     `Sex: ${s}`,
+    `CBC Machine / Analyzer: ${analyzer.value}`,
     `Laboratory: ${form.value.labName || 'N/A'}`,
     `Location: ${[form.value.labCity, form.value.labCountry].filter(Boolean).join(', ') || 'N/A'}`,
     `Test date: ${form.value.testDate || 'N/A'}`,
-    `WBC: ${form.value.wbc} ×10⁹/L (ref 5.0–10.0)`,
-    `RBC: ${form.value.rbc} ×10¹²/L (ref ${s === 'M' ? '4.5–5.2' : '3.4–5.6'})`,
-    `Hemoglobin: ${form.value.hb} g/L (ref ${s === 'M' ? '135–175' : '125–155'})`,
-    `Hematocrit: ${form.value.hct} L/L (ref ${s === 'M' ? '0.40–0.52' : '0.36–0.48'})`,
-    `Platelets: ${form.value.plt} ×10⁹/L (ref 150–400)`,
-    `MCV: ${form.value.mcv} fL (ref 82–92)`,
-    `MCH: ${form.value.mch} pg (ref 27–32)`,
-    `MCHC: ${form.value.mchc} g/L (ref 320–380)`,
-    `Neutrophils: ${form.value.neutrophils} (ref 0.50–0.70)`,
-    `Lymphocytes: ${form.value.lymphocytes} (ref 0.20–0.40)`,
-    `Monocytes: ${form.value.monocytes} (ref 0.02–0.06)`,
-    `Eosinophils: ${form.value.eosinophils} (ref 0.02–0.05)`,
-    `Basophils: ${form.value.basophils} (ref 0.00–0.01)`,
-  ].join('\n')
+  ]
+
+  coreLines.push(`WBC: ${form.value.wbc} ×10⁹/L (ref 5–10)`)
+
+  if (form.value.rbc !== '' && form.value.rbc != null) {
+    coreLines.push(`RBC: ${form.value.rbc} ×10¹²/L (ref ${refString('rbc')})`)
+  } else {
+    coreLines.push('RBC: not provided')
+  }
+
+  coreLines.push(`Hemoglobin: ${form.value.hb} g/L (ref ${refString('hb')})`)
+  coreLines.push(`Hematocrit: ${form.value.hct} L/L (ref ${refString('hct')})`)
+
+  if (form.value.plt !== '' && form.value.plt != null) {
+    coreLines.push(`Platelets: ${form.value.plt} ×10⁹/L (ref ${refString('plt')})`)
+  } else {
+    coreLines.push('Platelets: not provided')
+  }
+
+  if (form.value.mcv !== '' && form.value.mcv != null) {
+    coreLines.push(`MCV: ${form.value.mcv} fL (ref ${refString('mcv')})`)
+  } else {
+    coreLines.push('MCV: not provided')
+  }
+
+  if (form.value.mch !== '' && form.value.mch != null) {
+    coreLines.push(`MCH: ${form.value.mch} pg (ref ${refString('mch')})`)
+  } else {
+    coreLines.push('MCH: not provided')
+  }
+
+  if (form.value.mchc !== '' && form.value.mchc != null) {
+    coreLines.push(`MCHC: ${form.value.mchc} g/L (ref ${refString('mchc')})`)
+  } else {
+    coreLines.push('MCHC: not provided')
+  }
+
+  coreLines.push(
+    `Neutrophils: ${form.value.neutrophils || 'not provided'} (ref ${refString('neut')})`,
+  )
+  coreLines.push(
+    `Lymphocytes: ${form.value.lymphocytes || 'not provided'} (ref ${refString('lymph')})`,
+  )
+  coreLines.push(
+    `Monocytes: ${form.value.monocytes || 'not provided'} (ref ${refString('mono')})`,
+  )
+  coreLines.push(
+    `Eosinophils: ${form.value.eosinophils || 'not provided'} (ref ${refString('eos')})`,
+  )
+  coreLines.push(
+    `Basophils: ${form.value.basophils || 'not provided'} (ref ${refString('baso')})`,
+  )
+
+  const core = coreLines.join('\n')
 
   const abnormals =
     (summaryItems.value || [])
@@ -488,6 +636,8 @@ function normHctSend(v) {
   return n > 1.5 ? Number((n / 100).toFixed(2)) : n
 }
 
+const numOrNull = (v) => (v === '' || v == null ? null : Number(v))
+
 /* Save inputs + interpretation into cbc.tests + cbc.interpretations */
 async function saveInterpretationRPC(prompt, resultMarkdown) {
   const { data: authData } = await supabase.auth.getUser()
@@ -495,6 +645,24 @@ async function saveInterpretationRPC(prompt, resultMarkdown) {
   if (!authData?.user) {
     lastSavedIds.value = null
     return
+  }
+
+  const currentAnalyzer = form.value.analyzer || 'pentra'
+
+  // Normalized ratios for saving
+  const neutRatio = form.value.neutrophils === '' ? '' : normRatioSend(form.value.neutrophils)
+  const lymphRatio = form.value.lymphocytes === '' ? '' : normRatioSend(form.value.lymphocytes)
+  const monoRatio = form.value.monocytes === '' ? '' : normRatioSend(form.value.monocytes)
+  const eosRatio = form.value.eosinophils === '' ? '' : normRatioSend(form.value.eosinophils)
+  const basoRatio = form.value.basophils === '' ? '' : normRatioSend(form.value.basophils)
+
+  // For Abbott, also store the real Segmenters % separately
+  let segmentersPercent = null
+  if (currentAnalyzer === 'abbott' && neutRatio !== '') {
+    const nNum = Number(neutRatio)
+    if (!Number.isNaN(nNum)) {
+      segmentersPercent = Number((nNum * 100).toFixed(2)) // e.g. 0.35 -> 35.00
+    }
   }
 
   const payload = {
@@ -505,21 +673,24 @@ async function saveInterpretationRPC(prompt, resultMarkdown) {
     lab_city: form.value.labCity?.trim() || null,
     lab_country: form.value.labCountry?.trim() || null,
     test_date: form.value.testDate || null,
+    analyzer: currentAnalyzer,
 
-    wbc: Number(form.value.wbc),
-    rbc: Number(form.value.rbc),
-    hb: Number(form.value.hb),
-    hct: normHctSend(form.value.hct),
-    mcv: Number(form.value.mcv),
-    mch: Number(form.value.mch),
-    mchc: Number(form.value.mchc),
-    plt: Number(form.value.plt),
+    wbc: numOrNull(form.value.wbc),
+    rbc: numOrNull(form.value.rbc),
+    hb: numOrNull(form.value.hb),
+    hct: form.value.hct === '' || form.value.hct == null ? null : normHctSend(form.value.hct),
+    mcv: numOrNull(form.value.mcv),
+    mch: numOrNull(form.value.mch),
+    mchc: numOrNull(form.value.mchc),
+    plt: numOrNull(form.value.plt),
 
-    neutrophils: form.value.neutrophils === '' ? '' : normRatioSend(form.value.neutrophils),
-    lymphocytes: form.value.lymphocytes === '' ? '' : normRatioSend(form.value.lymphocytes),
-    monocytes: form.value.monocytes === '' ? '' : normRatioSend(form.value.monocytes),
-    eosinophils: form.value.eosinophils === '' ? '' : normRatioSend(form.value.eosinophils),
-    basophils: form.value.basophils === '' ? '' : normRatioSend(form.value.basophils),
+    neutrophils: neutRatio,
+    lymphocytes: lymphRatio,
+    monocytes: monoRatio,
+    eosinophils: eosRatio,
+    basophils: basoRatio,
+
+    segmenters_percent: segmentersPercent,
 
     provider: provider.value === 'openai' ? 'openai' : 'groq',
     model: provider.value === 'openai' ? OPENAI_MODEL : GROQ_MODEL,
@@ -606,22 +777,14 @@ async function callOpenAI(prompt) {
 const validateAllBeforeSubmit = () => {
   // Step 1
   if (!canProceedFromStep1.value) {
-    errorMsg.value = 'Please complete your personal and laboratory details before analyzing.'
+    errorMsg.value =
+      'Please complete your personal, laboratory, and machine details before analyzing.'
     currentStep.value = 1
     return false
   }
 
   // Step 2: CBC core
-  const requiredCBC = [
-    ['wbc', wbcRules],
-    ['rbc', rbcRules],
-    ['hb', hbRules],
-    ['hct', hctRules],
-    ['mcv', mcvRules],
-    ['mch', mchRules],
-    ['mchc', mchcRules],
-    ['plt', pltRules],
-  ]
+  const requiredCBC = getRequiredCBC()
 
   for (const [key, rules] of requiredCBC) {
     if (form.value[key] === '' || form.value[key] == null || !runRules(form.value[key], rules)) {
@@ -663,6 +826,7 @@ async function onSubmit() {
       labName: form.value.labName || '',
       labCity: form.value.labCity || '',
       labCountry: form.value.labCountry || '',
+      analyzer: analyzer.value,
     }
 
     await saveInterpretationRPC(prompt, aiResult.value)
@@ -707,8 +871,8 @@ async function onSubmit() {
           <template #subtitle>
             <p class="ms-4 text-wrap">
               <span v-if="!showResult">
-                Guided steps: enter your details, add CBC values, choose your AI, then analyze your
-                report. 🩺
+                Guided steps: enter your details, choose your analyzer, add CBC values, choose your
+                AI, then analyze your report. 🩺
               </span>
               <span v-else>
                 Below is your personalized AI interpretation — summarizing possible findings and
@@ -731,7 +895,7 @@ async function onSubmit() {
 
             <!-- UPDATED WIZARD STEPS -->
             <div class="wizard-steps">
-              <!-- grey base line + red progress -->
+              <!-- grey base line + green progress -->
               <div class="wizard-bar">
                 <div
                   class="wizard-bar-fill"
@@ -801,7 +965,7 @@ async function onSubmit() {
                   </v-col>
 
                   <!-- Laboratory Name -->
-                  <v-col cols="12">
+                  <v-col cols="12" class="mb-5">
                     <v-text-field
                       label="Laboratory Name"
                       v-model="form.labName"
@@ -810,6 +974,22 @@ async function onSubmit() {
                       density="comfortable"
                       prepend-inner-icon="mdi-hospital-building"
                       hint="e.g., City Diagnostics Laboratory"
+                      persistent-hint
+                    />
+                  </v-col>
+
+                  <!-- Analyzer -->
+                  <v-col cols="12" md="6" class="mb-3">
+                    <v-select
+                      v-model="form.analyzer"
+                      :items="analyzerItems"
+                      label="CBC Machine / Analyzer"
+                      item-title="title"
+                      item-value="value"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-microscope"
+                      hint="If you are not sure, you may leave this as Pentra (generic CBC)."
                       persistent-hint
                     />
                   </v-col>
@@ -896,7 +1076,9 @@ async function onSubmit() {
                       class="cbc-input"
                     />
                   </v-col>
-                  <v-col :cols="mobile ? 12 : 3">
+
+                  <!-- RBC only for Pentra -->
+                  <v-col v-if="form.analyzer !== 'abbott'" :cols="mobile ? 12 : 3">
                     <v-text-field
                       label="RBC"
                       v-model="form.rbc"
@@ -912,6 +1094,7 @@ async function onSubmit() {
                       class="cbc-input"
                     />
                   </v-col>
+
                   <v-col :cols="mobile ? 12 : 3">
                     <v-text-field
                       label="Hemoglobin"
@@ -953,7 +1136,7 @@ async function onSubmit() {
                       inputmode="decimal"
                       step="1"
                       suffix="×10⁹/L"
-                      hint="Normal: 150–400"
+                      :hint="form.analyzer === 'abbott' ? 'Normal: 150–390' : 'Normal: 150–400'"
                       persistent-hint
                       variant="outlined"
                       density="comfortable"
@@ -962,13 +1145,16 @@ async function onSubmit() {
                   </v-col>
                 </v-row>
 
-                <!-- Red Cell Indices -->
-                <div class="mt-4 mb-2 text-subtitle d-flex align-center gap-2">
+                <!-- Red Cell Indices: not shown for Abbott -->
+                <div
+                  v-if="form.analyzer !== 'abbott'"
+                  class="mt-4 mb-2 text-subtitle d-flex align-center gap-2"
+                >
                   <v-icon size="20" color="#B71C1C">mdi-flask-outline</v-icon>
                   <span>Red Cell Indices</span>
                 </div>
 
-                <v-row>
+                <v-row v-if="form.analyzer !== 'abbott'">
                   <v-col :cols="mobile ? 12 : 3">
                     <v-text-field
                       label="MCV"
@@ -1022,20 +1208,30 @@ async function onSubmit() {
                 <!-- Differential -->
                 <div class="mt-4 mb-2 text-subtitle d-flex align-center gap-2">
                   <v-icon size="20" color="#B71C1C">mdi-clipboard-pulse-outline</v-icon>
-                  <span>Differential (enter ratios 0–1)</span>
+                  <span>
+                    {{
+                      form.analyzer === 'abbott'
+                        ? 'Differential (enter percentages; we will convert)'
+                        : 'Differential (enter ratios 0–1)'
+                    }}
+                  </span>
                 </div>
 
                 <v-row>
                   <v-col :cols="mobile ? 12 : 3">
                     <v-text-field
-                      label="Neutrophils"
+                      :label="form.analyzer === 'abbott' ? 'Segmenters' : 'Neutrophils'"
                       v-model="form.neutrophils"
                       :rules="neutRules"
                       type="number"
                       step="0.01"
                       inputmode="decimal"
-                      placeholder="e.g., 0.62"
-                      hint="Normal: 0.50–0.70"
+                      :placeholder="form.analyzer === 'abbott' ? 'e.g., 35' : 'e.g., 0.62'"
+                      :hint="
+                        form.analyzer === 'abbott'
+                          ? 'Normal: 37–72 % (we convert this to ratio)'
+                          : 'Normal: 0.50–0.70'
+                      "
                       persistent-hint
                       variant="outlined"
                       density="comfortable"
@@ -1050,8 +1246,12 @@ async function onSubmit() {
                       type="number"
                       step="0.01"
                       inputmode="decimal"
-                      placeholder="e.g., 0.25"
-                      hint="Normal: 0.20–0.40"
+                      :placeholder="form.analyzer === 'abbott' ? 'e.g., 51' : 'e.g., 0.25'"
+                      :hint="
+                        form.analyzer === 'abbott'
+                          ? 'Normal: 20–50 %'
+                          : 'Normal: 0.20–0.40'
+                      "
                       persistent-hint
                       variant="outlined"
                       density="comfortable"
@@ -1066,8 +1266,12 @@ async function onSubmit() {
                       type="number"
                       step="0.01"
                       inputmode="decimal"
-                      placeholder="e.g., 0.04"
-                      hint="Normal: 0.02–0.06"
+                      :placeholder="form.analyzer === 'abbott' ? 'e.g., 9' : 'e.g., 0.04'"
+                      :hint="
+                        form.analyzer === 'abbott'
+                          ? 'Normal: 8–14 %'
+                          : 'Normal: 0.02–0.06'
+                      "
                       persistent-hint
                       variant="outlined"
                       density="comfortable"
@@ -1082,8 +1286,12 @@ async function onSubmit() {
                       type="number"
                       step="0.01"
                       inputmode="decimal"
-                      placeholder="e.g., 0.02"
-                      hint="Normal: 0.02–0.05"
+                      :placeholder="form.analyzer === 'abbott' ? 'e.g., 4' : 'e.g., 0.02'"
+                      :hint="
+                        form.analyzer === 'abbott'
+                          ? 'Normal: 0–6 %'
+                          : 'Normal: 0.02–0.05'
+                      "
                       persistent-hint
                       variant="outlined"
                       density="comfortable"
@@ -1098,8 +1306,8 @@ async function onSubmit() {
                       type="number"
                       step="0.01"
                       inputmode="decimal"
-                      placeholder="e.g., 0.01"
-                      hint="Normal: 0.00–0.01"
+                      :placeholder="form.analyzer === 'abbott' ? 'e.g., 1' : 'e.g., 0.01'"
+                      hint="Normal: 0–1 % (0.00–0.01 ratio)"
                       persistent-hint
                       variant="outlined"
                       density="comfortable"
@@ -1174,7 +1382,7 @@ async function onSubmit() {
                     :disabled="loading"
                     prepend-icon="mdi-flash"
                   >
-                    Analyze Blood Test
+                    Analyze
                   </v-btn>
                 </div>
 
@@ -1203,6 +1411,7 @@ async function onSubmit() {
                   :lab-city="resultMeta.labCity"
                   :lab-country="resultMeta.labCountry"
                   :test-date="resultMeta.takenAt"
+                  :machine="resultMeta.analyzer"
                   :save-success="successMsg"
                   :save-error="errorMsg"
                   :summary-items="summaryItems"
@@ -1264,7 +1473,7 @@ async function onSubmit() {
   overflow: hidden;
 }
 
-/* red progress line */
+/* green progress line */
 .wizard-bar-fill {
   position: absolute;
   top: 0;
