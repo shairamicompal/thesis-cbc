@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 8000;
 
 // CORS handling
 app.use((req, res, next) => {
-  const allowedOrigin = process.env.FRONTEND_URL || 'https://thesis-cbc-git-main-shaira-micompals-projects.vercel.app'; // Frontend URL
+  const allowedOrigin = process.env.FRONTEND_URL || 'https://hemasense.vercel.app'; // Set your frontend URL here
   
   res.header("Access-Control-Allow-Origin", allowedOrigin);  // Allow frontend domain
   res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
@@ -58,12 +58,6 @@ app.get("/", (_req, res) => {
 // AI proxy route for asking AI models
 app.post("/api/ask", async (req, res) => {
   try {
-    // Check if the API key is valid
-    const token = req.headers['authorization']?.split(' ')[1]; // Extract the token from the request
-    if (!token || token !== process.env.GROQ_API_KEY) {  // Validate against the stored API key
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
     const { provider, model, prompt } = req.body ?? {};
 
     if (!provider || !model || !prompt) {
