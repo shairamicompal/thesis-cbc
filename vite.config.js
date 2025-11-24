@@ -1,16 +1,29 @@
-// vite.config.js
-import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
-import vueDevTools from "vite-plugin-vue-devtools";
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
-  plugins: [vue(), vueDevTools()],
-  resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
+  plugins: [vue()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://thesis-cbc-git-development-shaira-micompals-projects.vercel.app', // Your backend URL
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path, // Keep the path as-is
+        configure: (proxy, options) => {
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            console.log('Proxying request:', req.method, req.url, '→', options.target + req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            console.log('Proxy response:', proxyRes.statusCode, req.url);
+          });
+        },
+      },
     },
   },
-  // No `server.proxy` here.
-  // All API calls should go through import.meta.env.VITE_API_BASE
+  resolve: {
+    alias: {
+      '@': '/src', // Adjust according to your folder structure
+    },
+  },
 });
