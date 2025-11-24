@@ -1,9 +1,9 @@
 // src/utils/API/groqClient.js
 export async function callGroq({ prompt, model, apiBase = "" }) {
   const res = await fetch(`${apiBase}/api/ask`, {
-    method: "POST",
+    method: "POST", // Ensures POST method is used
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider: "groq", model, prompt }),
+    body: JSON.stringify({ provider: "groq", model, prompt })
   });
 
   if (!res.ok) {

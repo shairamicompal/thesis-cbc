@@ -5,16 +5,12 @@ const stripThink = (t = "") =>
   String(t || "").replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
 export default async function handler(req, res) {
-  // ===== CORS: applies to ALL requests =====
+  // CORS: applies to ALL requests
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization"
-  );
-  // ========================================
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  // Handle OPTIONS method (Preflight)
+  // Preflight: If OPTIONS request, respond and exit
   if (req.method === "OPTIONS") {
     res.status(200).end();
     return;
