@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 8000;
 
 // CORS Handling
 app.use((req, res, next) => {
-  const allowedOrigin = process.env.FRONTEND_URL || 'https://hemasense.vercel.app/'; // Your frontend URL
+  const allowedOrigin = process.env.FRONTEND_URL || 'https://hemasense.vercel.app'; // Your frontend URL
 
   res.header('Access-Control-Allow-Origin', allowedOrigin); // Allow only frontend domain
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
