@@ -1,4 +1,3 @@
-<!-- src/components/layout/navigation/BottomNavi.vue -->
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
@@ -6,11 +5,11 @@ import { mainNav } from './sideNavigation'
 
 const route = useRoute()
 
-const HOME     = { title: 'Home',    icon: 'mdi-home',    path: '/dashboard' }
-const ACCOUNT  = { title: 'Account', icon: 'mdi-account', path: '/account/settings' }
-const FAB      = { title: 'Interpreter', icon: 'mdi mdi-robot', path: '/interpreter' }
+const HOME = { title: 'Home', icon: 'mdi-home', path: '/dashboard' }
+const ACCOUNT = { title: 'Account', icon: 'mdi-account', path: '/account/settings' }
+const FAB = { title: 'Interpreter', icon: 'mdi mdi-robot', path: '/interpreter' }
 
-const toPath = t => `/${t.replace(/\s+/g, '-').toLowerCase()}`
+const toPath = (t) => `/${t.replace(/\s+/g, '-').toLowerCase()}`
 
 const items = computed(() => {
   const filtered = mainNav
@@ -25,11 +24,11 @@ const isFabActive = computed(() => route.path.startsWith(FAB.path))
 /* 🔹 When on Interpreter, don't select any bottom-nav item */
 const activeIndex = computed(() => {
   if (isFabActive.value) return null
-  const idx = items.value.findIndex(i => route.path.startsWith(i.path))
+  const idx = items.value.findIndex((i) => route.path.startsWith(i.path))
   return idx === -1 ? 0 : idx
 })
 
-const leftFlankIndex  = computed(() => Math.ceil(items.value.length / 2) - 1)
+const leftFlankIndex = computed(() => Math.ceil(items.value.length / 2) - 1)
 const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
 </script>
 
@@ -42,7 +41,7 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
     border="top"
     class="bn"
     :model-value="activeIndex ?? undefined"
-    style="--fab-gap: 25px;"
+    style="--fab-gap: 25px"
   >
     <v-btn
       v-for="(item, i) in items"
@@ -53,8 +52,8 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
       class="nav-btn"
       :class="{
         active: activeIndex === i,
-        'flank-left':  i === leftFlankIndex,
-        'flank-right': i === rightFlankIndex
+        'flank-left': i === leftFlankIndex,
+        'flank-right': i === rightFlankIndex,
       }"
       :ripple="false"
       :selected-class="null"
@@ -85,47 +84,145 @@ const rightFlankIndex = computed(() => Math.ceil(items.value.length / 2))
 </template>
 
 <style scoped>
-:deep(.bn .v-btn--active){ background: transparent !important; }
-.bn { position: relative; border-radius: 0; }
+:deep(.bn .v-btn--active) {
+  background: transparent !important;
+}
+.bn {
+  position: relative;
+  border-radius: 0;
+}
 
-.v-bottom-navigation { padding: 0 8px; }
-.nav-btn { min-width: 70px; margin: 0 7px; position: relative; color:#6b7280; }
+.v-bottom-navigation {
+  padding: 0 8px;
+}
+.nav-btn {
+  min-width: 70px;
+  margin: 0 7px;
+  position: relative;
+  color: #6b7280;
+}
 
-.nav-btn.flank-left  { margin-right:  var(--fab-gap, 44px); }
-.nav-btn.flank-right { margin-left:   var(--fab-gap, 44px); }
+.nav-btn.flank-left {
+  margin-right: var(--fab-gap, 44px);
+}
+.nav-btn.flank-right {
+  margin-left: var(--fab-gap, 44px);
+}
 
-.active-pill{
-  position: absolute; inset: 5px auto auto 50%; transform: translateX(-50%);
-  width: 36px; height: 36px; border-radius: 999px;
+.active-pill {
+  position: absolute;
+  inset: 5px auto auto 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
   background: rgba(61, 106, 228, 0.18);
-  opacity: 0; transition: opacity .18s ease; pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
 }
-.nav-btn.active .active-pill{ opacity: 1; }
-.nav-btn.active .v-icon{ color:#3d91e4; }
+.nav-btn.active .active-pill {
+  opacity: 1;
+}
+.nav-btn.active .v-icon {
+  color: #3d91e4;
+}
 
-/* Fixed, teleported FAB */
-.fab-fixed{
-  position: fixed; left: 50%; transform: translateX(-50%);
+.fab-fixed {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(38px + env(safe-area-inset-bottom));
-  z-index: 9999; pointer-events: none;
+  z-index: 9999;
+  pointer-events: none;
 }
-.fab-ring{
-  position: absolute; inset: -6px; border-radius: 999px;
-  background:#fff; box-shadow: 0 10px 20px rgba(0,0,0,.12); z-index:-1;
+.fab-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
+  z-index: -1;
 }
-.fab-btn{
-  pointer-events:auto; width:56px; height:56px; border-radius:999px;
-  background:#3d91e4; color:#fff;
-  box-shadow:0 18px 28px rgba(61, 117, 228, 0.35);
-  transition: transform .18s, box-shadow .18s, background-color .18s;
+.fab-btn {
+  pointer-events: auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: #3d91e4;
+  color: #fff;
+  box-shadow: 0 18px 28px rgba(61, 117, 228, 0.35);
+  transition:
+    transform 0.18s,
+    box-shadow 0.18s,
+    background-color 0.18s;
 }
-.fab-btn:hover{ transform: translateY(-2px); background:#3d91e4; box-shadow:0 22px 34px rgba(61, 111, 228, 0.4);}
+.fab-btn:hover {
+  transform: translateY(-2px);
+  background: #3d91e4;
+  box-shadow: 0 22px 34px rgba(61, 111, 228, 0.4);
+}
 
-/* 🔹 Visual "active" state for the FAB when on /interpreter */
-.fab-fixed.fab-active .fab-ring{ box-shadow: 0 14px 28px rgba(61,111,228,.35); }
-.fab-btn.active{ background:#2f7ad4; box-shadow:0 22px 34px rgba(61,111,228,.45); transform: translateY(-1px); }
+.fab-fixed.fab-active .fab-ring {
+  box-shadow: 0 14px 28px rgba(61, 111, 228, 0.35);
+}
+.fab-btn.active {
+  background: #2f7ad4;
+  box-shadow: 0 22px 34px rgba(61, 111, 228, 0.45);
+  transform: translateY(-1px);
+}
 
-/* spacing tweaks you already had */
-.v-bottom-navigation { padding: 0 8px; }
-.nav-btn { margin: 0 -3px; min-width: 70px; }
+/* Media Queries for Tablets and Large Screens */
+@media (max-width: 1024px) {
+  .nav-btn {
+    min-width: 60px;
+    margin: 0 5px;
+  } /* Reduce button width and spacing */
+  .fab-btn {
+    width: 50px;
+    height: 50px;
+  } /* Adjust FAB size */
+  .v-bottom-navigation {
+    height: 60px;
+    padding: 0 12px;
+  } /* Reduce nav height */
+  .nav-btn .text-caption {
+    font-size: 12px;
+  } /* Reduce text size */
+}
+
+/* Adjusting for smaller tablet screens or iPads in portrait */
+@media (max-width: 768px) {
+  .nav-btn {
+    min-width: 55px;
+    margin: 0 4px;
+  }
+  .fab-btn {
+    width: 48px;
+    height: 48px;
+  }
+  .v-bottom-navigation {
+    height: 55px;
+    padding: 0 10px;
+  }
+  .nav-btn .text-caption {
+    font-size: 10px;
+  }
+}
+
+/* Adjustments for larger tablets and landscape orientation */
+@media (min-width: 1025px) and (max-width: 1280px) {
+  .nav-btn {
+    min-width: 65px;
+    margin: 0 6px;
+  }
+  .fab-btn {
+    width: 52px;
+    height: 52px;
+  }
+  .v-bottom-navigation {
+    height: 65px;
+    padding: 0 14px;
+  }
+}
 </style>
