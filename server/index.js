@@ -10,18 +10,29 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// CORS Handling
+// CORS Handling - FIXED VERSION
 app.use((req, res, next) => {
-  const allowedOrigin = process.env.FRONTEND_URL || 'https://hemasense.vercel.app'; // Your frontend URL
-
-  res.header('Access-Control-Allow-Origin', allowedOrigin); // Allow only frontend domain
+  const allowedOrigins = [
+    'https://hemasense.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:8000'
+  ];
+  
+  const origin = req.headers.origin;
+  
+  // Allow requests from allowed origins
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true'); // To allow cookies or authentication
+  res.header('Access-Control-Allow-Credentials', 'true');
 
   // Handle preflight request (OPTIONS)
   if (req.method === 'OPTIONS') {
-    return res.status(200).end(); // Respond to preflight request
+    return res.status(200).end();
   }
 
   next();
@@ -45,13 +56,15 @@ const stripThink = (t = '') => t.replace(/<think>[\s\S]*?<\/think>/gi, '').trim(
 
 // Health check route
 app.get('/', (_req, res) => {
-  res.json({ ok: true, service: 'cbc-server' });
+  res.json({ ok: true, service: 'cbc-server', timestamp: new Date().toISOString() });
 });
 
 // AI request handler (Groq or OpenAI)
 app.post('/api/ask', async (req, res) => {
   try {
     const { provider, model, prompt } = req.body ?? {};
+
+    console.log('📩 Received request:', { provider, model, promptLength: prompt?.length });
 
     if (!provider || !model || !prompt) {
       return res.status(400).json({ error: 'provider, model, and prompt are required' });
@@ -62,6 +75,7 @@ app.post('/api/ask', async (req, res) => {
         return res.status(500).json({ error: 'GROQ_API_KEY is not set on server' });
       }
 
+      console.log('🤖 Calling Groq API...');
       const resp = await groq.chat.completions.create({
         model,
         messages: [
@@ -72,6 +86,7 @@ app.post('/api/ask', async (req, res) => {
       });
 
       const text = resp?.choices?.[0]?.message?.content?.trim() || '(No content returned)';
+      console.log('✅ Groq response received');
       return res.json({ text: stripThink(text) });
     }
 
@@ -80,6 +95,7 @@ app.post('/api/ask', async (req, res) => {
         return res.status(500).json({ error: 'OPENAI_API_KEY is not set on server' });
       }
 
+      console.log('🤖 Calling OpenAI API...');
       const resp = await openai.chat.completions.create({
         model,
         messages: [
@@ -90,6 +106,7 @@ app.post('/api/ask', async (req, res) => {
       });
 
       const text = resp?.choices?.[0]?.message?.content?.trim() || '(No content returned)';
+      console.log('✅ OpenAI response received');
       return res.json({ text: stripThink(text) });
     }
 
