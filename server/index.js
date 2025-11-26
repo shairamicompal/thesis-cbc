@@ -10,27 +10,37 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// CORS Handling - FIXED VERSION
+// CORS Handling - WITH CAPACITOR SUPPORT
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
   const allowedOrigins = [
+    'capacitor://localhost',
+    'http://localhost',
     'https://hemasense.vercel.app',
     'http://localhost:5173',
     'http://localhost:3000',
     'http://localhost:8000'
   ];
-  
-  const origin = req.headers.origin;
-  
-  // Allow requests from allowed origins
-  if (allowedOrigins.includes(origin)) {
+
+  // Allow Capacitor and Vercel origins
+  const isAllowed = origin && (
+    allowedOrigins.includes(origin) ||
+    origin.includes('vercel.app') ||
+    origin.startsWith('capacitor://')
+  );
+
+  if (isAllowed) {
     res.header('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    // Capacitor sometimes doesn't send origin header
+    res.header('Access-Control-Allow-Origin', '*');
   }
-  
+
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
 
-  // Handle preflight request (OPTIONS)
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -41,30 +51,25 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(morgan('dev'));
 
-// Supabase setup
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-// Groq and OpenAI API setup
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Helper function to strip unnecessary "think" tags
 const stripThink = (t = '') => t.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-// Health check route
 app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'cbc-server', timestamp: new Date().toISOString() });
 });
 
-// AI request handler (Groq or OpenAI)
 app.post('/api/ask', async (req, res) => {
   try {
     const { provider, model, prompt } = req.body ?? {};
 
-    console.log('📩 Received request:', { provider, model, promptLength: prompt?.length });
+    console.log('📩 Received request:', { provider, model, promptLength: prompt?.length, origin: req.headers.origin });
 
     if (!provider || !model || !prompt) {
       return res.status(400).json({ error: 'provider, model, and prompt are required' });
@@ -118,18 +123,15 @@ app.post('/api/ask', async (req, res) => {
   }
 });
 
-// Fallback route for unsupported routes
 app.use((req, res) => {
   res.status(404).json({ error: 'Not Found', path: req.path });
 });
 
-// Error handler for unexpected errors
 app.use((err, _req, res, _next) => {
   console.error('❌ Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start the Express server
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
