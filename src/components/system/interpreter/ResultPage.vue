@@ -30,8 +30,7 @@ const props = defineProps({
   chipColorFn: { type: Function, default: () => '' },
   fmtValFn: {
     type: Function,
-    default: (item) =>
-      item && item.value !== undefined ? item.value : '—',
+    default: (item) => (item && item.value !== undefined ? item.value : '—'),
   },
 })
 
@@ -41,18 +40,8 @@ const authUser = useAuthUserStore()
 /* --------- Computed: patient info --------- */
 const patientName = computed(() => {
   const meta = authUser?.userData || {}
-  const first =
-    meta.firstname ||
-    meta.first_name ||
-    meta.firstName ||
-    meta.given_name ||
-    ''
-  const last =
-    meta.lastname ||
-    meta.last_name ||
-    meta.lastName ||
-    meta.family_name ||
-    ''
+  const first = meta.firstname || meta.first_name || meta.firstName || meta.given_name || ''
+  const last = meta.lastname || meta.last_name || meta.lastName || meta.family_name || ''
   const full = `${first} ${last}`.trim()
   return full || meta.full_name || meta.name || ''
 })
@@ -87,9 +76,7 @@ const labLocation = computed(() => {
 
 const displayTestDate = computed(() => {
   if (!props.testDate) return ''
-  return props.testDate.includes('T')
-    ? props.testDate.split('T')[0]
-    : props.testDate
+  return props.testDate.includes('T') ? props.testDate.split('T')[0] : props.testDate
 })
 
 /* --------- Filtered CBC summary (hide non-Abbott fields) --------- */
@@ -101,18 +88,13 @@ const filteredSummaryItems = computed(() => {
   }
 
   const skip = new Set(['rbc', 'mcv', 'mch', 'mchc'])
-  return (props.summaryItems || []).filter(
-    (item) => !skip.has(item.key),
-  )
+  return (props.summaryItems || []).filter((item) => !skip.has(item.key))
 })
 
-const hasCBCSummary = computed(
-  () => (filteredSummaryItems.value || []).length > 0,
-)
+const hasCBCSummary = computed(() => (filteredSummaryItems.value || []).length > 0)
 
 /* --------- Helper: ref formatting for differentials --------- */
-const isDiffKey = (k) =>
-  ['neut', 'lymph', 'mono', 'eos', 'baso'].includes(k)
+const isDiffKey = (k) => ['neut', 'lymph', 'mono', 'eos', 'baso'].includes(k)
 
 const formatRef = (item) => {
   // For differentials, show as %
@@ -137,24 +119,14 @@ const formatRef = (item) => {
     <!-- Top bar -->
     <v-card-title class="d-flex justify-space-between align-center gap-3">
       <div class="d-flex align-center gap-2">
-        <v-btn
-          variant="outlined"
-          size="small"
-          class="back-btn"
-          @click="emit('back')"
-        >
+        <v-btn variant="outlined" size="small" class="back-btn" @click="emit('back')">
           <v-icon start>mdi-arrow-left</v-icon>
           Back
         </v-btn>
       </div>
 
       <div class="d-flex align-center gap-2">
-        <v-chip
-          size="small"
-          color="#0D47A1"
-          variant="elevated"
-          class="text-white"
-        >
+        <v-chip size="small" color="#0D47A1" variant="elevated" class="text-white">
           {{ providerLabel }}
         </v-chip>
       </div>
@@ -212,18 +184,9 @@ const formatRef = (item) => {
       </v-sheet>
 
       <!-- CBC Summary -->
-      <v-sheet
-        v-if="hasCBCSummary"
-        class="cbc-summary-sheet mt-4"
-        rounded="xl"
-        variant="outlined"
-      >
-        <div
-          class="cbc-summary-header d-flex align-center gap-2 mb-2"
-        >
-          <v-icon size="18" class="me-2">
-            mdi-clipboard-pulse-outline
-          </v-icon>
+      <v-sheet v-if="hasCBCSummary" class="cbc-summary-sheet mt-4" rounded="xl" variant="outlined">
+        <div class="cbc-summary-header d-flex align-center gap-2 mb-2">
+          <v-icon size="18" class="me-2"> mdi-clipboard-pulse-outline </v-icon>
           <h3>Status Overview</h3>
         </div>
 
@@ -253,58 +216,37 @@ const formatRef = (item) => {
                   {{ item.status }}
                 </v-chip>
               </div>
-              <div class="cbc-ref">
-                Ref: {{ formatRef(item) }}
-              </div>
+              <div class="cbc-ref">Ref: {{ formatRef(item) }}</div>
             </div>
           </v-col>
         </v-row>
       </v-sheet>
 
       <!-- Loading -->
-      <v-progress-linear
-        v-if="loading || saving"
-        indeterminate
-        class="mt-4"
-      />
+      <v-progress-linear v-if="loading || saving" indeterminate class="mt-4" />
 
       <!-- AI Interpretation -->
       <div class="mt-6 ai-section">
         <div class="ai-header d-flex align-center gap-2 mb-2">
-          <v-icon color="#b70d37" class="me-2">
-            mdi-robot-outline
-          </v-icon>
+          <v-icon color="#b70d37" class="me-2"> mdi-robot-outline </v-icon>
           <span class="ai-title">AI-Assisted Explanation</span>
         </div>
 
-        <v-alert
-          type="warning"
-          variant="tonal"
-          density="comfortable"
-          class="mb-4"
-        >
-          This explanation is for educational support only and must
-          not replace assessment by a licensed physician. If you feel
-          unwell or your results are significantly abnormal, please
+        <v-alert type="warning" variant="tonal" density="comfortable" class="mb-4">
+          This explanation is for educational support only and must not replace assessment by a
+          licensed physician. If you feel unwell or your results are significantly abnormal, please
           consult your doctor.
         </v-alert>
 
-        <div
-          v-if="htmlResult"
-          class="ai-markdown"
-          v-html="htmlResult"
-        />
+        <div v-if="htmlResult" class="ai-markdown" v-html="htmlResult" />
 
         <div v-else class="text-grey-darken-1 text-body-2">
-          No interpretation available. Please go back and run the
-          analysis again.
+          No interpretation available. Please go back and run the analysis again.
         </div>
       </div>
 
       <!-- Save buttons + messages -->
-      <div
-        class="mt-6 d-flex flex-wrap gap-3 justify-space-between align-center"
-      >
+      <div class="mt-6 d-flex flex-wrap gap-3 justify-space-between align-center">
         <div>
           <v-btn
             v-if="canSave"
@@ -422,7 +364,11 @@ const formatRef = (item) => {
 }
 
 .ai-markdown {
-  font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont,
+  font-family:
+    'Poppins',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
     sans-serif;
   line-height: 1.6;
   font-size: 0.92rem;
@@ -451,7 +397,25 @@ const formatRef = (item) => {
   font-weight: 600;
 }
 
+/* General styling for success message */
 .status-alert {
   min-width: 180px;
+  max-width: 100%;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  text-align: center;
+  margin-top: 10px;
+  border-radius: 8px;
+}
+
+/* Tablet responsiveness */
+@media (max-width: 768px) {
+  .status-alert {
+    width: auto;
+    padding: 0.5rem;
+    margin: 0 auto;
+    font-size: 1rem;
+    max-width: 90%; /* ensures the alert does not stretch too much */
+  }
 }
 </style>
